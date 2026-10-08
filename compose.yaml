@@ -1,0 +1,22 @@
+name: contextpulse-test
+services:
+  app:
+    build: .
+    image: contextpulse:prototype
+    environment:
+      CONTEXTPULSE_MODE: hosted
+      PUBLIC_ORIGIN: http://127.0.0.1:8903
+    ports:
+      - "127.0.0.1:8903:8899"
+    volumes:
+      - demo-data:/app/data
+    init: true
+    stop_grace_period: 40s
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 512m
+volumes:
+  demo-data:

@@ -1,0 +1,31 @@
+@import "tailwindcss";
+@config "../tailwind.config.cjs";
+@source "./app.js";
+button:disabled { opacity: .5; cursor: wait; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.message-body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.75; }
+summary { cursor: pointer; }
+textarea { resize: vertical; }
+select, input { max-width: 100%; }
+.app-main input:not([type="checkbox"]):not([type="radio"]), .app-main textarea, .app-main select, dialog input, dialog select { border: 1px solid #cbd5e1; background-color: white; padding: .55rem .7rem; }
+.app-main input:focus, .app-main textarea:focus, .app-main select:focus, dialog input:focus { outline: 2px solid #c7d2fe; outline-offset: 1px; border-color: #818cf8; }
+.brand-mark { display: flex; flex-direction: column; gap: 3px; width: 22px; }
+.brand-mark i { display: block; height: 4px; background: #4f46e5; border-radius: 2px; }
+.brand-mark i:nth-child(2) { width: 15px; }
+.brand-mark i:nth-child(3) { width: 19px; }
+button, summary, select, a { transition: background-color .15s, border-color .15s; }
+button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px solid #4f46e5; outline-offset: 3px; }
+dialog::backdrop { background: rgb(15 23 42 / .22); }
+.context-editor { position: sticky; top: 84px; }
+.context-snippet { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 850px) {
+  .app-sidebar { width: 64px; }
+  .sidebar-label { display: none; }
+  .app-sidebar > div { padding: 16px 12px; }
+  .app-sidebar nav { padding: 6px; }
+  #project-switch { padding: 8px; }
+  .app-main { padding-left: 64px; }
+  .app-header { left: 64px; padding: 12px; }
+  .context-editor { position: static; }
+}
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; } }

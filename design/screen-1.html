@@ -1,0 +1,716 @@
+<!DOCTYPE html><html class="light" lang="ko"><head><meta charset="utf-8"><meta content="width=device-width, initial-scale=1.0" name="viewport"><meta content="web_dashboard" name="shell-type"><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&amp;family=Inter:wght@100..900&amp;family=JetBrains+Mono:wght@100..900&amp;display=swap" rel="stylesheet"><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script><script id="tailwind-config">tailwind.config={darkMode:"class",theme:{extend:{"colors":{"surface-container-highest":"#e2e8f0","secondary-container":"#e6f4ea","error-container":"#fee2e2","on-secondary":"#047857","tertiary-container":"#ffe4e6","tertiary-fixed-dim":"#f43f5e","inverse-surface":"#1e293b","surface-container-lowest":"#ffffff","primary":"#4f46e5","on-surface-variant":"#64748b","surface-container-high":"#f1f5f9","outline":"#94a3b8","on-secondary-fixed-variant":"#065f46","surface-dim":"#f8fafc","primary-fixed-dim":"#c7d2fe","on-secondary-fixed":"#022c22","on-background":"#0f172a","secondary-fixed-dim":"#6ee7b7","on-primary":"#ffffff","surface":"#f8fafc","primary-container":"#4f46e5","on-tertiary":"#ffffff","on-primary-fixed":"#312e81","on-tertiary-fixed":"#881337","tertiary":"#e11d48","tertiary-fixed":"#fecdd3","on-error-container":"#991b1b","surface-variant":"#f1f5f9","background":"#f8fafc","primary-fixed":"#e0e7ff","on-primary-container":"#ffffff","inverse-on-surface":"#f8fafc","surface-bright":"#ffffff","on-tertiary-container":"#9f1239","on-error":"#ffffff","outline-variant":"#cbd5e1","secondary-fixed":"#a7f3d0","error":"#dc2626","secondary":"#059669","on-secondary-container":"#065f46","on-tertiary-fixed-variant":"#be123c","on-surface":"#0f172a","surface-tint":"#4f46e5","inverse-primary":"#818cf8","surface-container":"#ffffff","surface-container-low":"#ffffff","on-primary-fixed-variant":"#3730a3"},"borderRadius":{"DEFAULT":"0.125rem","lg":"0.25rem","xl":"0.5rem","full":"0.75rem"},"spacing":{"gutter-lg":"1.5rem","space-md":"0.75rem","margin":"1rem","margin-lg":"2rem","space-lg":"1rem","gutter":"1rem","space-xl":"1.5rem","space-sm":"0.5rem","space-xs":"0.25rem"},"fontFamily":{"headline-xl":["Geist"],"code-block":["JetBrains Mono"],"headline-lg":["Geist"],"code-inline":["JetBrains Mono"],"body-md":["Inter"],"body-sm":["Inter"],"label-sm":["JetBrains Mono"],"body-lg":["Inter"],"label-md":["JetBrains Mono"],"headline-lg-mobile":["Geist"],"headline-md":["Geist"]},"fontSize":{"headline-xl":["2rem",{"lineHeight":"2.5rem","letterSpacing":"-0.025em","fontWeight":"600"}],"code-block":["0.75rem",{"lineHeight":"1.25rem","letterSpacing":"0em","fontWeight":"400"}],"headline-lg":["1.5rem",{"lineHeight":"2rem","letterSpacing":"-0.02em","fontWeight":"600"}],"code-inline":["0.8125rem",{"lineHeight":"1.25rem","letterSpacing":"0em","fontWeight":"400"}],"body-md":["0.875rem",{"lineHeight":"1.375rem","letterSpacing":"0em","fontWeight":"400"}],"body-sm":["0.75rem",{"lineHeight":"1.125rem","letterSpacing":"0.005em","fontWeight":"400"}],"label-sm":["0.6875rem",{"lineHeight":"1rem","letterSpacing":"0.02em","fontWeight":"500"}],"body-lg":["0.9375rem",{"lineHeight":"1.5rem","letterSpacing":"-0.005em","fontWeight":"400"}],"label-md":["0.8125rem",{"lineHeight":"1.25rem","letterSpacing":"-0.01em","fontWeight":"500"}],"headline-lg-mobile":["1.25rem",{"lineHeight":"1.75rem","letterSpacing":"-0.015em","fontWeight":"600"}],"headline-md":["1.125rem",{"lineHeight":"1.5rem","letterSpacing":"-0.015em","fontWeight":"600"}]}}}}</script></head><body class="bg-slate-50 text-slate-900 font-body-md text-body-md min-h-screen selection:bg-indigo-100 selection:text-indigo-900"><aside class="fixed left-0 top-0 h-full w-72 bg-white border-r border-slate-200 z-50 flex flex-col justify-between shadow-sm"><div class="flex flex-col"><div class="px-gutter-lg pt-space-lg pb-space-md flex items-center justify-between border-b border-slate-100"><div class="flex items-center gap-space-sm"><div class="w-7 h-7 rounded bg-indigo-600 flex items-center justify-center text-white font-headline-md text-headline-md font-bold shadow-sm">C</div><div class="flex flex-col"><span class="font-headline-md text-headline-md text-slate-900 font-semibold tracking-tight">ContextPulse</span><span class="font-label-sm text-label-sm text-slate-500 tracking-wider uppercase font-semibold">Align Engine v0.9</span></div></div><div class="w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-emerald-100"></div></div><div class="px-space-lg py-space-sm"><div class="p-space-sm rounded-lg bg-slate-50 border border-slate-200/80 flex flex-col gap-space-xs"><div class="flex items-center justify-between"><span class="font-label-sm text-label-sm text-slate-500 font-semibold uppercase">Project Scope</span><span class="font-label-sm text-label-sm text-emerald-600 flex items-center gap-1 font-medium"><span class="material-symbols-outlined text-[13px]">cloud_done</span>Local DB</span></div><div class="flex items-center justify-between text-slate-800 hover:text-indigo-600 transition-colors cursor-pointer"><span class="font-label-md text-label-md truncate font-semibold">Web3 App Strategy</span><span class="material-symbols-outlined text-slate-400 text-[16px]">unfold_more</span></div></div></div><nav class="flex flex-col gap-space-xs px-space-md mt-space-sm" id="sidebarNav"><button class="nav-item w-full flex items-center gap-space-md px-space-md py-space-sm rounded-lg transition-all bg-indigo-50 border border-indigo-100 text-indigo-700 font-semibold shadow-xs text-left" data-tab="chat"><span class="material-symbols-outlined text-[18px] text-indigo-600">chat_bubble</span><span class="font-label-md text-label-md">프로젝트 채팅</span></button><button class="nav-item w-full flex items-center gap-space-md px-space-md py-space-sm rounded-lg text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-all font-medium text-left" data-tab="inspector"><span class="material-symbols-outlined text-[18px] text-slate-400">difference</span><span class="font-label-md text-label-md">컨텍스트 인스펙터</span></button><button class="nav-item w-full flex items-center gap-space-md px-space-md py-space-sm rounded-lg text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-all font-medium text-left" data-tab="decisions"><span class="material-symbols-outlined text-[18px] text-slate-400">history_toggle_off</span><span class="font-label-md text-label-md">결정 및 이력 관리</span></button><button class="nav-item w-full flex items-center gap-space-md px-space-md py-space-sm rounded-lg text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-all font-medium text-left" data-tab="settings"><span class="material-symbols-outlined text-[18px] text-slate-400">tune</span><span class="font-label-md text-label-md">로컬 환경 및 모델 설정</span></button></nav></div><div class="p-space-lg bg-slate-50 border border-slate-200/80 m-space-md rounded-lg flex flex-col gap-space-xs"><div class="flex items-center justify-between"><span class="font-label-sm text-label-sm text-slate-500 uppercase font-semibold">Active Pipeline</span><span class="font-label-sm text-label-sm text-emerald-700 bg-emerald-100/80 border border-emerald-200 px-1.5 py-0.5 rounded font-medium">OAuth</span></div><div class="flex items-center gap-space-xs text-slate-900"><span class="material-symbols-outlined text-indigo-600 text-[16px]">bolt</span><span class="font-code-inline text-code-inline font-semibold truncate">Claude 3.5 Sonnet</span></div><div class="flex items-center justify-between pt-space-xs font-label-sm text-label-sm text-slate-500"><span class="flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">database</span>Local SQLite</span><span class="text-slate-700 font-code-inline text-code-inline font-medium">12.4 MB</span></div></div></aside><div class="pl-72"><header class="fixed top-0 left-72 right-0 h-16 bg-white/95 backdrop-blur-md border-b border-slate-200 z-40 px-gutter-lg flex items-center justify-between shadow-xs"><div class="flex items-center gap-space-lg"><div class="flex items-center gap-space-sm font-label-md text-label-md"><span class="text-slate-500">Workspace</span><span class="material-symbols-outlined text-[14px] text-slate-400">chevron_right</span><span class="text-slate-900 font-semibold" id="activeBreadcrumb">Web3 Strategy Pipeline</span></div><div class="h-4 w-[1px] bg-slate-200 hidden sm:block"></div><div class="hidden md:flex items-center gap-space-xs"><span class="font-label-sm text-label-sm px-2 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 cursor-pointer transition-colors font-medium">#아키텍처</span><span class="font-label-sm text-label-sm px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-slate-600 hover:bg-slate-200 hover:text-slate-900 cursor-pointer transition-colors font-medium">#평가기준</span></div></div><div class="flex items-center gap-space-md"><div class="hidden lg:flex items-center gap-space-sm font-label-sm text-label-sm"><span class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 font-semibold"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>검증 엔진: 활성</span><span class="flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-100 border border-slate-200 text-slate-600 font-medium"><span class="material-symbols-outlined text-[14px] text-slate-500">dns</span>로컬 모드</span></div><div class="h-4 w-[1px] bg-slate-200 hidden lg:block"></div><a class="hidden sm:flex items-center gap-1 text-slate-600 hover:text-slate-900 font-label-md text-label-md transition-colors font-medium" href="#"><span class="material-symbols-outlined text-[18px]">code</span>Repo</a><button class="px-space-md py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 font-label-md text-label-md font-medium transition-all flex items-center gap-1 shadow-sm" id="btnNewChat"><span class="material-symbols-outlined text-[16px]">add</span>새 대화 시작</button><div class="w-8 h-8 rounded-full bg-indigo-100 border border-indigo-200 text-indigo-700 flex items-center justify-center font-semibold text-[13px] shadow-xs"><span class="material-symbols-outlined text-[18px]">person</span></div></div></header><main class="w-full pt-16 bg-slate-50 min-h-screen"><div class="flex flex-col w-full">
+<!-- Sub-header / Pipeline Telemetry Strip -->
+<div class="w-full bg-white border-b border-slate-200 px-gutter-lg py-2.5 flex flex-wrap items-center justify-between gap-space-sm shadow-xs">
+<div class="flex items-center gap-space-md flex-wrap">
+<div class="flex items-center gap-space-xs font-label-sm text-label-sm">
+<span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+<span class="text-slate-900 font-semibold">SESSION: session_wd9_20250228</span>
+</div>
+<span class="text-slate-300 font-code-inline text-code-inline">|</span>
+<div class="flex items-center gap-space-xs font-label-sm text-label-sm text-slate-600">
+<span class="material-symbols-outlined text-[15px] text-indigo-600">psychology</span>
+<span class="">얼라인먼트 엔진: <strong class="text-slate-900 font-semibold">Strict Rule Enforcer v2</strong></span>
+</div>
+<span class="text-slate-300 font-code-inline text-code-inline hidden sm:inline">|</span>
+<div class="hidden sm:flex items-center gap-space-xs font-label-sm text-label-sm text-slate-600">
+<span class="material-symbols-outlined text-[15px] text-emerald-600">memory</span>
+<span class="">로컬 SQLite 컨텍스트 DB: <span class="text-emerald-700 font-code-inline font-semibold">동기화 완료 (0.4ms)</span></span>
+</div>
+</div>
+<div class="flex items-center gap-space-xs">
+<span class="px-2 py-0.5 rounded bg-slate-100 border border-slate-200/80 font-label-sm text-label-sm text-slate-600 font-medium">토큰: 1,482</span>
+<span class="px-2 py-0.5 rounded bg-slate-100 border border-slate-200/80 font-label-sm text-label-sm text-slate-600 font-medium">온도: 0.20</span>
+<span class="px-2 py-0.5 rounded bg-emerald-50 border border-emerald-200 font-label-sm text-label-sm text-emerald-700 font-code-inline font-medium">규칙 기반 검증 활성 (로컬 엔진)</span>
+</div>
+</div>
+<!-- Main Dual-Pane Studio Layout -->
+<div class="w-full grid grid-cols-1 xl:grid-cols-12 gap-0 min-h-[calc(100vh-6.75rem)]">
+<!-- CENTER CHAT & REASONING STREAM (xl:col-span-8) -->
+<section class="xl:col-span-8 flex flex-col justify-between bg-slate-50 min-w-0 border-r border-slate-200">
+<!-- Message Stream Container -->
+<div class="flex-1 overflow-y-auto px-gutter-lg py-space-xl flex flex-col gap-space-xl" id="chatStream">
+<!-- Turn 1: User Directive (Decision Update) -->
+<article class="flex flex-col gap-space-xs max-w-4xl">
+<div class="flex items-center justify-between font-label-sm text-label-sm text-slate-500">
+<div class="flex items-center gap-space-xs">
+<div class="w-6 h-6 rounded bg-slate-800 text-white flex items-center justify-center font-code-inline text-[11px] font-bold shadow-xs">
+<span class="material-symbols-outlined text-[14px]">person</span>
+</div>
+<span class="text-slate-900 font-bold">Engineer</span>
+<span class="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 font-label-sm text-[10px] font-bold uppercase tracking-wider">OPERATOR</span>
+<span class="text-slate-400 font-code-inline">14:28:02</span>
+</div>
+<div class="flex items-center gap-space-xs">
+<span class="px-2 py-0.5 rounded bg-indigo-50 border border-indigo-200 text-indigo-700 font-label-sm text-label-sm font-semibold flex items-center gap-1 shadow-xs">
+<span class="material-symbols-outlined text-[13px] text-indigo-600">gavel</span>
+        결정 갱신됨 #DEC-042
+      </span>
+</div>
+</div>
+<div class="p-space-md rounded-xl bg-slate-100/90 border border-slate-300 text-slate-900 shadow-xs flex flex-col gap-space-xs">
+<p class="font-body-md text-body-md text-slate-900 font-medium leading-relaxed">
+      결정 수정: 이 프로젝트에서는 Solana 필수성 입증을 주요 평가조건으로 삼지 않는다.
+    </p>
+<div class="flex flex-wrap items-center justify-between gap-space-xs pt-space-xs font-label-sm text-label-sm border-t border-slate-200/80">
+<span class="flex items-center gap-1 text-emerald-700 font-medium">
+<span class="material-symbols-outlined text-[14px]">check_circle</span>
+        규칙 벡터 색인 및 로컬 규칙 저장 완료
+      </span>
+<div class="flex items-center gap-2">
+<button class="text-slate-500 hover:text-indigo-600 font-label-sm text-label-sm flex items-center gap-0.5" onclick="toggleTechMeta('meta-dec042')">
+<span class="material-symbols-outlined text-[13px]">tune</span>기술 메타데이터
+</button>
+<div class="flex items-center gap-1 font-code-inline text-slate-500">
+<span class="text-slate-400">분류:</span>
+<span class="px-1.5 py-0.5 rounded bg-white border border-slate-200 text-indigo-700 font-semibold">#평가기준</span>
+<span class="px-1.5 py-0.5 rounded bg-white border border-slate-200 text-indigo-700 font-semibold">#인프라제약</span>
+</div>
+</div>
+</div>
+<!-- Technical metadata collapsible -->
+<div class="hidden pt-2 border-t border-slate-200/60 font-code-inline text-[11px] text-slate-600 space-y-1" id="meta-dec042">
+<div class="">• Commit Hash: <span class="text-slate-800 font-medium">0x9f2a4 commit_state_synced</span></div>
+<div class="">• Scope: <span class="text-indigo-700 font-medium">project_local (Priority: P1)</span></div>
+<div class="">• Supressed Rule: <span class="text-rose-600 line-through">#DEC-018 (Solana TPS 의무 조항)</span></div>
+</div>
+</div>
+</article>
+<!-- Turn 2: User Message (Triggering Verification Scenario) -->
+<article class="flex flex-col gap-space-xs max-w-4xl">
+<div class="flex items-center justify-between font-label-sm text-label-sm text-slate-500">
+<div class="flex items-center gap-space-xs">
+<div class="w-6 h-6 rounded bg-slate-800 text-white flex items-center justify-center font-code-inline text-[11px] font-bold shadow-xs">
+<span class="material-symbols-outlined text-[14px]">person</span>
+</div>
+<span class="text-slate-900 font-bold">Engineer</span>
+<span class="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 font-label-sm text-[10px] font-bold uppercase tracking-wider">OPERATOR</span>
+<span class="text-slate-400 font-code-inline">14:29:18</span>
+</div>
+<button class="flex items-center gap-1 font-code-inline text-slate-500 hover:text-indigo-600 text-label-sm transition-colors" onclick="toggleTechMeta('meta-queryhash')">
+<span class="material-symbols-outlined text-[13px]">code</span>
+<span class="">상세 기술 메타데이터</span>
+</button>
+</div>
+<div class="p-space-md rounded-xl bg-slate-100/90 border border-slate-300 text-slate-900 shadow-xs flex flex-col gap-space-xs">
+<p class="font-body-md text-body-md text-slate-900 font-semibold">
+      새로운 탈중앙화 아이디어(소셜 그래프 프로토콜) 평가해줘.
+    </p>
+<div class="flex items-center justify-between pt-space-xs font-label-sm text-label-sm text-slate-500 border-t border-slate-200/80">
+<span class="flex items-center gap-1 text-slate-600">
+<span class="material-symbols-outlined text-[13px] text-indigo-600">auto_mode</span>
+        의도 자동 분류: <strong class="text-slate-800">아키텍처 적합성 분석 및 제약 대조</strong>
+</span>
+<span class="font-code-inline text-slate-500">출처 추적 완료 (원문 연계)</span>
+</div>
+<!-- Technical Metadata Collapsible -->
+<div class="hidden pt-2 border-t border-slate-200/60 font-code-inline text-[11px] text-slate-600 space-y-1" id="meta-queryhash">
+<div class="">• Query Hash: <span class="text-slate-800 font-medium">0x9f2a4b88d</span></div>
+<div class="">• Matched Vectors: <span class="text-indigo-700 font-medium">#탈중앙화 (0.94), #평가기준 (0.89)</span></div>
+<div class="">• Evaluator Pipeline: <span class="text-slate-800 font-medium">local_strict_v2 / route_auto_direct</span></div>
+</div>
+</div>
+</article>
+<!-- Turn 3: AI Final Assistant Response (NOW PLACED DIRECTLY UNDER THE QUESTION) -->
+<article class="flex flex-col gap-space-xs max-w-4xl self-end w-full">
+<!-- AI Header with distinctive badge & avatar -->
+<div class="flex items-center justify-between font-label-sm text-label-sm flex-row-reverse">
+<div class="flex items-center gap-space-xs">
+<div class="w-6 h-6 rounded bg-indigo-600 text-white flex items-center justify-center font-bold shadow-xs ring-2 ring-indigo-200">
+<span class="material-symbols-outlined text-[15px]">psychology</span>
+</div>
+<span class="text-indigo-900 font-bold">ContextPulse Assistant</span>
+<span class="px-2 py-0.5 rounded-full bg-indigo-100 border border-indigo-200 text-indigo-700 font-label-sm text-[10px] font-bold uppercase tracking-wider">AI ALIGNMENT AGENT</span>
+<span class="px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 font-label-sm text-[10px] font-bold flex items-center gap-0.5">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>자율 교정 완료
+</span>
+</div>
+<div class="flex items-center gap-space-xs font-code-inline text-label-sm text-slate-400">
+<span class="">응답 지연: 840ms</span>
+<span class="">•</span>
+<span class="">Claude 3.5 Sonnet</span>
+</div>
+</div>
+<!-- Compact Top Status Banner with Accordion Toggle Button -->
+<div class="rounded-lg bg-amber-50/90 border border-amber-200/90 px-space-md py-2 flex items-center justify-between gap-space-sm shadow-xs transition-all">
+<div class="flex items-center gap-space-xs text-amber-900 font-label-sm text-label-sm font-semibold">
+<span class="material-symbols-outlined text-amber-600 text-[18px]">warning</span>
+<span class="">⚠️ 결정 충돌 1건 자동 교정됨 <strong class="text-amber-950 font-bold">(#DEC-042 Solana 기준 준수)</strong></span>
+</div>
+<button class="px-2.5 py-1 rounded-md bg-white border border-amber-300 text-amber-900 hover:bg-amber-100 font-label-sm text-label-sm font-semibold flex items-center gap-1 shadow-xs transition-colors cursor-pointer" id="btnToggleAccordion" onclick="toggleTraceAccordion()">
+<span id="accordionBtnText" class="">교정 과정 및 근거 보기</span>
+<span class="material-symbols-outlined text-[16px] transition-transform duration-200" id="accordionArrow">expand_more</span>
+</button>
+</div>
+<!-- COLLAPSIBLE ACCORDION: PIPELINE INSPECTION CARD (Initially Hidden, Smooth Toggle) -->
+<div class="hidden transition-all duration-300 ease-in-out" id="traceAccordionSection">
+<div class="rounded-xl bg-white border-2 border-indigo-200/80 p-space-md shadow-sm flex flex-col gap-space-md">
+<!-- Header Bar of Interceptor -->
+<div class="flex flex-wrap items-center justify-between gap-space-xs pb-space-xs border-b border-slate-100">
+<div class="flex items-center gap-space-sm">
+<span class="flex h-2.5 w-2.5 relative">
+<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+<span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500"></span>
+</span>
+<span class="font-label-md text-label-md font-bold text-slate-900 tracking-wide uppercase">
+Pipeline Alignment Trace
+</span>
+<span class="px-2 py-0.5 rounded bg-indigo-50 border border-indigo-200 font-label-sm text-label-sm text-indigo-700 font-code-inline font-medium">RUN #12 (#run_09f3e8b1_eval)</span>
+</div>
+<div class="flex items-center gap-space-sm font-label-sm text-label-sm">
+<span class="flex items-center gap-1 px-2 py-0.5 rounded bg-indigo-50 border border-indigo-200 text-indigo-700 font-label-sm text-label-sm font-semibold">RUN #12 (#run_09f3e8b1_eval)</span>
+<span class="px-2 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-700 font-code-inline font-medium">충돌 탐지 지연 320ms</span>
+</div>
+</div>
+<!-- Chronological Step Rails -->
+<div class="flex flex-col gap-space-sm relative">
+<!-- Step 1: Draft Generated -->
+<div class="flex items-start gap-space-md">
+<div class="flex flex-col items-center">
+<div class="w-6 h-6 rounded-full bg-slate-100 border border-slate-300 text-slate-700 flex items-center justify-center font-label-sm text-label-sm font-bold shadow-xs">
+1
+</div>
+<div class="w-0.5 h-full min-h-[44px] bg-slate-200"></div>
+</div>
+<div class="flex-1 p-space-sm rounded-lg bg-slate-50 border border-slate-200/80 flex flex-col gap-space-xs">
+<div class="flex items-center justify-between">
+<span class="font-label-md text-label-md font-semibold text-slate-800 flex items-center gap-1">
+<span class="material-symbols-outlined text-[15px] text-slate-500">description</span>
+초안 생성 (Draft Generated)
+</span>
+<span class="px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 font-label-sm text-label-sm font-medium">
+Raw LLM Pass 1
+</span>
+</div>
+<div class="p-space-xs rounded bg-white border border-slate-200 font-code-block text-code-block text-slate-700 leading-relaxed"><span class="text-rose-600 font-semibold bg-rose-50 px-1 rounded">Solana 상에서의 구현 적합성과 TPS 입증이 필수적이며...</span> 탈중앙화 소셜 그래프의 고빈도 상태 변화를 감당하기 위해 Solana 생태계 기술 스택을 필수로 검증해야 합니다. <span class="text-slate-400 font-medium">(구 #DEC-018 잔재 반영)</span></div>
+<div class="flex items-center gap-space-xs text-slate-500 font-label-sm text-label-sm">
+<span class="material-symbols-outlined text-[13px] text-amber-600">warning</span>
+<span class="text-amber-700 font-medium">주의:</span> 과거 Solana 기준 잔존 감지 가능성 대기 중
+</div>
+</div>
+</div>
+<!-- Step 2: Validator Inspector (Conflict Collision Detected) -->
+<div class="flex items-start gap-space-md">
+<div class="flex flex-col items-center">
+<div class="w-6 h-6 rounded-full bg-rose-500 text-white flex items-center justify-center font-label-sm text-label-sm font-bold shadow-sm animate-pulse">
+2
+</div>
+<div class="w-0.5 h-full min-h-[48px] bg-slate-200"></div>
+</div>
+<div class="flex-1 p-space-sm rounded-lg bg-rose-50/70 border border-rose-200 flex flex-col gap-space-xs shadow-xs">
+<div class="flex items-center justify-between flex-wrap gap-1">
+<span class="font-label-md text-label-md font-bold text-rose-800 flex items-center gap-1">
+<span class="material-symbols-outlined text-[16px] text-rose-600">gpp_bad</span>
+검증자 검사 (Validator - ⚠️ 충돌 감지!)
+</span>
+<span class="px-2 py-0.5 rounded bg-rose-100 border border-rose-300 text-rose-800 font-label-sm text-label-sm font-code-inline font-bold">
+COLLISION DETECTED
+</span>
+</div>
+<div class="p-space-xs rounded bg-white border border-rose-100 text-slate-800 font-body-sm text-body-sm flex flex-col gap-space-xs">
+<p class="text-rose-700 font-semibold">
+결정 #DEC-042 위반: Solana 필수 요구사항 검출됨.
+</p>
+<div class="px-space-xs py-1 rounded bg-slate-50 border border-slate-200 font-code-block text-code-block text-slate-600 flex items-center justify-between">
+<span class="font-medium text-slate-800">원문 근거: "이 프로젝트에서는 Solana 필수성 입증을 주요 평가조건으로 삼지 않는다"</span>
+<span class="text-indigo-700 font-label-sm text-label-sm font-semibold">#DEC-042 (Commit: 14:28:02)</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Step 3: Correction Context Injection (Strict Guideline) -->
+<div class="flex items-start gap-space-md">
+<div class="flex flex-col items-center">
+<div class="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center font-label-sm text-label-sm font-bold shadow-sm">
+3
+</div>
+<div class="w-0.5 h-full min-h-[44px] bg-slate-200"></div>
+</div>
+<div class="flex-1 p-space-sm rounded-lg bg-indigo-50/60 border border-indigo-200 flex flex-col gap-space-xs">
+<div class="flex items-center justify-between">
+<span class="font-label-md text-label-md font-semibold text-indigo-900 flex items-center gap-1">
+<span class="material-symbols-outlined text-[15px] text-indigo-600">auto_fix_high</span>
+교정 컨텍스트 주입 지침 (Correction Directive)
+</span>
+<span class="px-2 py-0.5 rounded bg-indigo-100 text-indigo-700 font-label-sm text-label-sm font-code-inline font-semibold">
+엄격한 교정 규칙
+</span>
+</div>
+<div class="p-2 rounded bg-white border border-indigo-200 font-body-sm text-body-sm text-slate-800">
+<span class="text-indigo-900 font-bold">주입 지침:</span> "Solana 필수성 미입증을 이유로 감점한 평가를 제거한다. 사용자가 정하지 않은 대체 기술 기준은 추가하지 않는다."
+</div>
+</div>
+</div>
+<!-- Step 4: Re-validation Completed -->
+<div class="flex items-start gap-space-md">
+<div class="flex flex-col items-center">
+<div class="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center font-label-sm text-label-sm font-bold shadow-sm">
+4
+</div>
+</div>
+<div class="flex-1 p-space-sm rounded-lg bg-emerald-50/70 border border-emerald-200 flex items-center justify-between">
+<div class="flex items-center gap-space-sm">
+<span class="font-label-md text-label-md font-bold text-emerald-800 flex items-center gap-1">
+<span class="material-symbols-outlined text-[16px] text-emerald-600">verified</span>
+자율 교정 및 재검증 통과 (Passed ✅)
+</span>
+<span class="font-label-sm text-label-sm text-emerald-700 bg-emerald-100/80 border border-emerald-200 px-2 py-0.5 rounded font-medium hidden md:inline">수동 승인 불필요 · 자동 규칙 적용됨</span>
+</div>
+<span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200 font-label-sm text-label-sm font-code-inline font-semibold">
+Status: Passed 200 OK
+</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Distinctive AI Response Bubble with subtle Indigo border accent -->
+<div class="p-space-lg rounded-xl bg-white border-2 border-indigo-200/90 text-slate-900 shadow-sm flex flex-col gap-space-md"><div class="flex flex-col gap-space-xs"><div class="flex items-center justify-between"><div class="flex items-center gap-2"><h3 class="font-headline-md text-headline-md text-slate-900 font-bold">새로운 탈중앙화 소셜 그래프 아이디어 평가</h3><span class="px-2 py-0.5 rounded bg-indigo-50 border border-indigo-200 font-code-inline text-[11px] font-semibold text-indigo-700">답변 #12 (#run_09f3e8b1_eval)</span></div><span class="px-2 py-0.5 rounded bg-indigo-50 border border-indigo-200 font-code-inline text-[11px] font-semibold text-indigo-700">Model: Claude 3.5 Sonnet</span></div><p class="font-body-md text-body-md text-slate-700 leading-relaxed">새로운 탈중앙화 소셜 그래프 아이디어 평가입니다. 최신 의사결정(<span class="text-indigo-700 font-semibold font-code-inline bg-indigo-50 px-1 py-0.5 rounded border border-indigo-200">#DEC-042: Solana 필수성 입증을 주요 평가조건으로 삼지 않는다</span>)에 따라 특정 L1 체인 TPS 종속성을 배제하고 탈중앙 데이터 주권 및 모듈러 검증 방식을 기준으로 평가합니다.</p></div><div class="grid grid-cols-1 md:grid-cols-2 gap-space-sm pt-space-xs"><div class="p-space-sm rounded-lg bg-slate-50 border border-slate-200 flex flex-col gap-space-xs"><div class="flex items-center justify-between"><span class="font-label-md text-label-md font-bold text-indigo-700">1. 데이터 주권 &amp; 관계 그래프 저장</span><span class="font-label-sm text-label-sm text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded font-semibold">[A+ 적합] DID 준수</span></div><p class="font-body-sm text-body-sm text-slate-600 leading-relaxed">#DEC-001 원칙에 부합하여 분산 ID(DID) 기반으로 사용자 계정과 팔로우 관계 그래프를 온체인/오프체인 하이브리드로 구성하여 검열 저항성을 확보할 수 있습니다.</p></div><div class="p-space-sm rounded-lg bg-slate-50 border border-slate-200 flex flex-col gap-space-xs"><div class="flex items-center justify-between"><span class="font-label-md text-label-md font-bold text-indigo-700">2. 체인 독립적 인터랙션 &amp; 프라이버시</span><span class="font-label-sm text-label-sm text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded font-semibold">규칙 부합</span></div><p class="font-body-sm text-body-sm text-slate-600 leading-relaxed">#DEC-042에 따라 Solana 등의 특정 단일 체인을 전제하지 않으며, 중앙 집중식 서버로의 평문 데이터 전송을 금지한 #DEC-004 보안 규정을 준수합니다.</p></div></div><div class="rounded-lg border border-slate-200 bg-slate-50/80 p-space-sm flex flex-col gap-space-sm"><div class="flex items-center justify-between border-b border-slate-200/80 pb-space-xs"><div class="flex items-center gap-space-xs font-label-sm text-label-sm font-bold text-slate-800"><span class="material-symbols-outlined text-[16px] text-indigo-600">hub</span>대화별 컨텍스트 추적: 주입 및 단계별 제외 맥락 명세</div><span class="text-[11px] font-code-inline text-slate-500 font-medium">출처 추적 완료 (원문 연계)</span></div><div class="grid grid-cols-1 md:grid-cols-2 gap-space-sm"><div class="p-space-xs rounded bg-white border border-slate-200 flex flex-col gap-1"><div class="flex items-center justify-between font-label-sm text-label-sm"><span class="font-bold text-emerald-800 flex items-center gap-1"><span class="material-symbols-outlined text-[13px] text-emerald-600">check_box</span>적용된 결정 (Injected)</span><span class="font-code-inline text-[10px] text-emerald-700 font-bold">3건 활성</span></div><div class="flex flex-wrap gap-1 pt-0.5"><span class="px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-800 font-code-inline text-[11px]">#DEC-001 [Global: DID 준수]</span><span class="px-1.5 py-0.5 rounded bg-indigo-50 border border-indigo-200 text-indigo-800 font-code-inline text-[11px]">#DEC-004 [Global: 평문 전송 금지]</span><span class="px-1.5 py-0.5 rounded bg-indigo-50 border border-indigo-200 text-indigo-800 font-code-inline text-[11px]">#DEC-042 [Topic: Solana 필수 해제]</span></div></div><div class="p-space-xs rounded bg-white border border-rose-200/80 flex flex-col gap-1"><div class="flex items-center justify-between font-label-sm text-label-sm"><span class="font-bold text-rose-800 flex items-center gap-1"><span class="material-symbols-outlined text-[13px] text-rose-600">block</span>제외된 맥락 및 단계 (Excluded)</span><span class="font-code-inline text-[10px] text-rose-700 font-bold">2건 제외됨</span></div><div class="flex flex-col gap-1 text-body-sm text-[11px] text-slate-600"><div class="flex items-center justify-between"><span class="font-code-inline text-rose-700 font-semibold line-through">#DEC-018: Solana TPS 의무</span><span class="text-rose-600 font-code-inline text-[10px]">[검증 단계 충돌로 제외됨]</span></div><div class="flex items-center justify-between"><span class="font-code-inline text-slate-500 line-through">#CTX-ARCHIVE-032</span><span class="text-slate-500 font-code-inline text-[10px]">[초안 단계 윈도우 필터링으로 제외됨]</span></div></div></div></div></div><div class="pt-space-sm flex flex-wrap items-center justify-between gap-space-sm font-label-sm text-label-sm border-t border-slate-100"><div class="flex flex-wrap items-center gap-space-xs"><button class="px-space-md py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 font-semibold transition-colors flex items-center gap-1 shadow-xs" id="btnOpenInspector" onclick="navigateToInspector()"><span class="material-symbols-outlined text-[15px]">difference</span>컨텍스트 Diff 인스펙터 열기 ↗</button><button class="px-space-sm py-1.5 rounded-lg bg-slate-100 border border-slate-200 text-slate-700 hover:bg-slate-200 transition-colors flex items-center gap-1 font-medium" onclick="toggleTechMeta('meta-prompts')"><span class="material-symbols-outlined text-[15px] text-slate-500">code_blocks</span>단계별 원문 프롬프트 보기</button></div><div class="flex items-center gap-space-xs font-code-inline text-slate-500"><span class="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-100 border border-slate-200 text-slate-700 font-medium"><span class="material-symbols-outlined text-[14px] text-emerald-600">speed</span>실행 메트릭: 충돌 탐지 지연 320ms</span></div></div><div class="hidden p-2 rounded bg-slate-50 border border-slate-200 font-code-block text-[11px] text-slate-700 space-y-1" id="meta-prompts"><div class="font-bold text-slate-900">[Prompt Pass 1] system: Strict Web3 / user: 새로운 탈중앙화 아이디어(소셜 그래프 프로토콜) 평가해줘.</div><div class="text-amber-800">[Interceptor] DEC-042 violation flagged. Injected: "Solana 필수성 미입증을 이유로 감점한 평가를 제거한다."</div><div class="text-emerald-800">[Prompt Pass 2] Adjusted output received, validated, 0 collisions remaining.</div></div></div>
+</article>
+</div>
+<!-- Bottom Chat Input Deck -->
+<div class="p-gutter-lg bg-white border-t border-slate-200 flex flex-col gap-space-sm shadow-xs relative">
+<!-- Dynamic Smart Registration Panel (Appears when decision toggle is ON or decision keywords typed) -->
+<div class="hidden p-3 rounded-lg bg-indigo-50/80 border border-indigo-200 transition-all flex flex-col gap-2 shadow-xs" id="decisionRegisterPanel"><div class="flex items-center justify-between"><div class="flex items-center gap-1.5 text-indigo-900 font-label-md text-label-md font-bold"><span class="material-symbols-outlined text-[18px] text-indigo-600">gavel</span><span class="">새로운 결정(Decision)으로 등록 설정</span></div><span class="px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 text-[11px] font-code-inline font-bold">#DEC Auto-Index</span></div><div class="grid grid-cols-1 md:grid-cols-3 gap-2 text-label-sm"><div><label class="block text-slate-600 font-medium mb-1">결정 범위 (Scope)</label><select class="w-full bg-white border border-slate-300 rounded px-2 py-1 text-slate-800 font-medium focus:ring-1 focus:ring-indigo-500 text-[12px]" id="decisionScopeSelect"><option value="project">프로젝트 전역 (Global Mandatory)</option><option selected="" value="topic">주제별 범위 (Topic-Scoped)</option><option value="task">작업별 범위 (Task-Scoped)</option></select></div><div><label class="block text-slate-600 font-medium mb-1">대체할 이전 결정 (선택)</label><select class="w-full bg-white border border-slate-300 rounded px-2 py-1 text-slate-800 font-medium focus:ring-1 focus:ring-indigo-500 text-[12px]" id="supersedeSelect"><option value="none">없음 (신규 결정 추가)</option><option value="DEC-042">#DEC-042 (Solana 평가 기준)</option><option value="DEC-001">#DEC-001 (DID 계정 명세)</option><option value="DEC-004">#DEC-004 (평문 전송 금지)</option><option value="DEC-018">#DEC-018 (Solana TPS 규정)</option></select></div><div><label class="block text-slate-600 font-medium mb-1">태그 분류</label><input class="w-full bg-white border border-slate-300 rounded px-2 py-1 text-slate-800 font-medium focus:ring-1 focus:ring-indigo-500 text-[12px]" id="decisionTagsInput" placeholder="#아키텍처 #스토리지" type="text" value="#아키텍처"></div></div><div class="text-[11px] text-indigo-800 font-body-sm flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">info</span>입력된 내용이 규칙 엔진에 즉시 색인되어 후속 질문의 검증 지표로 자동 반영됩니다.</div></div>
+<!-- Topic Tags & Toggle Controls -->
+<div class="hidden py-1 px-2.5 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-[12px] font-medium flex items-center justify-between" id="decisionCandidateNotice"><div class="flex items-center gap-1"><span class="material-symbols-outlined text-[14px] text-amber-600">lightbulb</span><span class="">[결정 후보 감지됨: 등록 여부 검토] 확정적 결정 문맥이 감지되었습니다. 등록하려면 우측 '결정으로 등록하기'를 체크하세요.</span></div><button type="button" class="text-amber-700 underline text-[11px]" onclick="activateDecisionManual()">등록 켜기</button></div><div class="flex flex-wrap items-center justify-between gap-space-sm">
+<div class="flex flex-wrap items-center gap-space-xs">
+<span class="font-label-sm text-label-sm text-slate-500 uppercase font-bold tracking-wider">Active Topics:</span>
+<span class="px-2 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 font-label-sm text-label-sm font-medium cursor-pointer hover:bg-indigo-100 transition-colors">
+#탈중앙화
+</span>
+<span class="px-2 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 font-label-sm text-label-sm font-medium cursor-pointer hover:bg-indigo-100 transition-colors">
+#아키텍처
+</span>
+<span class="px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-slate-600 font-label-sm text-label-sm hover:text-slate-900 cursor-pointer transition-colors flex items-center gap-1 font-medium" onclick="promptAddTag()">
+<span class="material-symbols-outlined text-[13px]">add</span>태그 추가
+</span>
+</div>
+<!-- Register as Decision Toggle (DEFAULT OFF) -->
+<label class="flex items-center gap-space-xs cursor-pointer select-none">
+<span class="font-label-sm text-label-sm text-slate-700 font-medium">결정으로 등록하기</span>
+<!-- DEFAULT OFF / UNCHECKED -->
+<input class="sr-only peer" id="decisionToggle" type="checkbox">
+<div class="w-8 h-4.5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-indigo-600 relative"></div>
+<span class="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-600 peer-checked:bg-indigo-50 peer-checked:border-indigo-200 peer-checked:text-indigo-700 font-label-sm text-[10px] font-code-inline font-semibold" id="decisionBadgeText">일반 질문 모드</span>
+</label>
+</div>
+<!-- Monospace Input Terminal Area -->
+<div class="rounded-lg bg-white border border-slate-300 p-space-sm flex flex-col gap-space-xs focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500 transition-all shadow-xs">
+<textarea class="w-full bg-transparent text-slate-900 placeholder:text-slate-400 text-body-md font-body-md resize-none focus:outline-none" id="chatTextarea" placeholder="새로운 프롬프트나 아키텍처 요구사항을 입력하세요... (e.g. '이 프로젝트는 분산 스토리지 계층에 IPFS를 채택한다' 입력 시 결정 패널 활성화)" rows="2"></textarea>
+<div class="flex items-center justify-between pt-space-xs font-label-sm text-label-sm border-t border-slate-100">
+<div class="flex items-center gap-space-sm text-slate-500">
+<span class="flex items-center gap-1 font-code-inline text-slate-600 font-medium">
+<span class="material-symbols-outlined text-[13px] text-indigo-600">tune</span>
+검증 모드: 로컬 규칙 대조 활성
+</span>
+<span class="hidden md:inline font-code-inline text-slate-400">⌘ + Enter / Enter로 전송</span>
+</div>
+<div class="flex items-center gap-space-sm">
+<span class="font-code-inline text-slate-400" id="charCount">0 / 4000</span>
+<button class="px-space-md py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 font-label-md text-label-md font-semibold transition-all flex items-center gap-1 shadow-xs cursor-pointer" id="btnSendMessage" onclick="handleSendMessage()">
+<span class="">보내기</span>
+<span class="material-symbols-outlined text-[16px]">arrow_upward</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- RIGHT CONTEXTUAL SIDEBAR: SELECTED CONTEXT SUMMARY (xl:col-span-4) -->
+<aside class="xl:col-span-4 bg-slate-50/80 p-gutter-lg flex flex-col gap-space-lg overflow-y-auto">
+<!-- Panel Header & Storage Counter -->
+<div class="flex flex-col gap-space-xs pb-space-sm border-b border-slate-200">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-space-xs">
+<span class="material-symbols-outlined text-indigo-600 text-[18px]">rule_folder</span>
+<h2 class="font-label-md text-label-md font-bold text-slate-900 uppercase tracking-wider">
+활성 컨텍스트 요약
+</h2>
+</div>
+<span class="px-2 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-700 font-code-inline text-label-sm font-semibold">
+주입 용량: 1.2 KB
+</span>
+</div>
+<p class="font-body-sm text-body-sm text-slate-600">
+현재 질문에 주입된 규칙 및 상태 트리 (로컬 규칙 주입 매트릭스)
+</p>
+</div>
+<!-- SECTION 1: Global Mandatory Decisions (Always Included) -->
+<div class="flex flex-col gap-space-sm">
+<div class="flex items-center justify-between font-label-sm text-label-sm">
+<span class="text-slate-600 uppercase font-bold flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px] text-indigo-600">lock</span>
+프로젝트 전역 필수 결정 (Global Mandatory)
+</span>
+<span class="text-indigo-700 font-code-inline font-bold">2개 활성</span>
+</div>
+<!-- Decision 1 -->
+<div class="p-space-sm rounded-lg bg-white border border-slate-200 flex flex-col gap-space-xs shadow-xs">
+<div class="flex items-center justify-between">
+<span class="px-1.5 py-0.5 rounded bg-indigo-50 border border-indigo-200 text-indigo-700 font-code-inline text-label-sm font-bold">
+#DEC-001 [전역]
+</span>
+<span class="font-label-sm text-label-sm text-emerald-700 font-semibold">항상 포함</span>
+</div>
+<p class="font-body-sm text-body-sm text-slate-800 font-medium">
+모든 계정 체계는 Self-Sovereign Identity(DID) 명세를 엄격히 준수한다.
+</p>
+<div class="flex items-center justify-between pt-space-xs text-slate-400 font-label-sm text-label-sm font-code-inline border-t border-slate-100">
+<span class="">우선순위: 필수 (P0)</span>
+<span class="text-slate-500 font-medium">+112 토큰</span>
+</div>
+</div>
+<!-- Decision 2 -->
+<div class="p-space-sm rounded-lg bg-white border border-slate-200 flex flex-col gap-space-xs shadow-xs">
+<div class="flex items-center justify-between">
+<span class="px-1.5 py-0.5 rounded bg-indigo-50 border border-indigo-200 text-indigo-700 font-code-inline text-label-sm font-bold">
+#DEC-004 [전역]
+</span>
+<span class="font-label-sm text-label-sm text-emerald-700 font-semibold">항상 포함</span>
+</div>
+<p class="font-body-sm text-body-sm text-slate-800 font-medium">
+중앙 집중식 분석 서버로의 평문 개인 데이터 전송을 영구 금지한다.
+</p>
+<div class="flex items-center justify-between pt-space-xs text-slate-400 font-label-sm text-label-sm font-code-inline border-t border-slate-100">
+<span class="">우선순위: 엄격 (P0)</span>
+<span class="text-slate-500 font-medium">+94 토큰</span>
+</div>
+</div>
+</div>
+<!-- SECTION 2: Topic-Matched Active Decisions -->
+<div class="flex flex-col gap-space-sm">
+<div class="flex items-center justify-between font-label-sm text-label-sm">
+<span class="text-slate-600 uppercase font-bold flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px] text-emerald-600">label_important</span>
+매칭된 주제별 결정 (Topic-Scoped)
+</span>
+<span class="text-emerald-700 font-code-inline font-bold">1개 활성</span>
+</div>
+<!-- Matched Decision Card (EXACT ORIGINAL PRESERVED) -->
+<div class="p-space-sm rounded-lg bg-white border-2 border-indigo-200 flex flex-col gap-space-xs shadow-xs">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-space-xs">
+<span class="px-1.5 py-0.5 rounded bg-indigo-600 text-white font-code-inline text-label-sm font-bold">
+#DEC-042
+</span>
+<span class="px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-700 font-label-sm text-[10px] font-bold">
+유효 / 활성
+</span>
+</div>
+<span class="font-label-sm text-label-sm text-slate-500 font-code-inline font-medium">v1.2 (최신)</span>
+</div>
+<p class="font-body-sm text-body-sm text-slate-900 leading-snug font-semibold">
+이 프로젝트에서는 Solana 필수성 입증을 주요 평가조건으로 삼지 않는다.
+</p>
+<div class="p-space-xs rounded bg-slate-50 border border-slate-200 flex flex-col gap-0.5 font-label-sm text-label-sm">
+<div class="flex items-center justify-between text-slate-500 font-medium">
+<span class="">매칭 트리거 태그:</span>
+<span class="text-indigo-700 font-code-inline font-semibold">#탈중앙화 #평가조건</span>
+</div>
+<div class="flex items-center justify-between text-slate-500 font-medium">
+<span class="">주입 페이로드:</span>
+<span class="text-slate-700 font-code-inline font-semibold">+68 토큰</span>
+</div>
+</div>
+</div>
+</div>
+<!-- SECTION 3: Filtered Out / Pruned Context (Conflict Mitigation) -->
+<div class="flex flex-col gap-space-sm">
+<div class="flex items-center justify-between font-label-sm text-label-sm">
+<span class="text-slate-600 uppercase font-bold flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px] text-rose-500">filter_alt_off</span>
+제외된 맥락 (Filtered Out Context)
+</span>
+<span class="text-rose-600 font-code-inline font-bold">1개 제외됨</span>
+</div>
+<!-- Excluded Node Card -->
+<div class="p-space-sm rounded-lg bg-slate-100 border border-slate-200 opacity-90 flex flex-col gap-space-xs"><div class="flex items-center justify-between"><span class="px-1.5 py-0.5 rounded bg-slate-200 text-slate-500 font-code-inline text-label-sm line-through font-semibold">#DEC-018</span><span class="px-1.5 py-0.5 rounded bg-rose-50 border border-rose-200 text-rose-700 font-label-sm text-[10px] font-bold">검증 단계 충돌로 제외됨</span></div><p class="font-body-sm text-body-sm text-slate-500 line-through">초기 평가 기준: Solana 고성능 TPS 파이프라인 필수 검증 조항</p><div class="p-space-xs rounded bg-white border border-slate-200 font-label-sm text-label-sm text-rose-700 flex items-start gap-1"><span class="material-symbols-outlined text-[14px] shrink-0 mt-0.5 text-rose-500">remove_circle_outline</span><span class="">제외 사유: <strong>#DEC-042</strong>에 의해 대체됨 (이력 보관 처리).</span></div><div class="pt-1 border-t border-slate-200 flex items-center justify-between text-[11px] font-code-inline text-slate-500"><span class="line-through">#CTX-ARCHIVE-032</span><span class="text-slate-400">[초안 단계 윈도우 필터링으로 제외됨]</span></div></div>
+</div>
+<!-- SECTION 4: Local Storage Persistence Vector Status -->
+<div class="mt-auto p-space-md rounded-lg bg-white border border-slate-200 flex flex-col gap-space-xs shadow-xs">
+<div class="flex items-center justify-between font-label-sm text-label-sm">
+<span class="text-slate-900 font-semibold flex items-center gap-1">
+<span class="material-symbols-outlined text-[15px] text-emerald-600">database</span>
+로컬 스토리지 상태
+</span>
+<span class="text-emerald-700 font-code-inline font-bold">정상 작동</span>
+</div>
+<div class="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+<div class="bg-indigo-600 h-1.5 rounded-full" style="width: 18%"></div>
+</div>
+<div class="flex items-center justify-between font-label-sm text-label-sm text-slate-500 font-code-inline pt-space-xs">
+<span class="">활성 주입 페이로드:</span>
+<span class="text-slate-900 font-semibold">1.2 KB 저장됨</span>
+</div>
+<div class="flex items-center justify-between font-label-sm text-label-sm text-slate-500 font-code-inline">
+<span class="">벡터 DB 경로:</span>
+<span class="text-slate-700 font-medium truncate max-w-[160px]">./db/pulse_local.db</span>
+</div>
+</div>
+</aside>
+</div>
+</div>
+<!-- Simple Toast Notification for Inspector Navigation and Actions -->
+<div class="fixed bottom-6 right-6 z-50 transform translate-y-20 opacity-0 transition-all duration-300 pointer-events-none" id="actionToast">
+<div class="bg-slate-900 text-white px-4 py-3 rounded-lg shadow-xl flex items-center gap-2 border border-slate-700 text-body-sm">
+<span class="material-symbols-outlined text-emerald-400 text-[18px]" id="toastIcon">check_circle</span>
+<span id="toastMsg" class="">작업이 처리되었습니다.</span>
+</div>
+</div>
+<script>
+  // Accordion Toggle for Pipeline Alignment Trace
+  let traceOpen = false;
+  function toggleTraceAccordion() {
+    traceOpen = !traceOpen;
+    const section = document.getElementById('traceAccordionSection');
+    const text = document.getElementById('accordionBtnText');
+    const arrow = document.getElementById('accordionArrow');
+
+    if (traceOpen) {
+      section.classList.remove('hidden');
+      text.textContent = '교정 과정 및 근거 접기';
+      arrow.textContent = 'expand_less';
+    } else {
+      section.classList.add('hidden');
+      text.textContent = '교정 과정 및 근거 보기';
+      arrow.textContent = 'expand_more';
+    }
+  }
+
+  // Collapsible Technical Metadata helper
+  function toggleTechMeta(id) {
+    const el = document.getElementById(id);
+    if (el) {
+      el.classList.toggle('hidden');
+    }
+  }
+
+  // Toast helper
+  function showToast(message, icon = 'check_circle') {
+    const toast = document.getElementById('actionToast');
+    const toastMsg = document.getElementById('toastMsg');
+    const toastIcon = document.getElementById('toastIcon');
+    if (!toast) return;
+
+    toastMsg.textContent = message;
+    toastIcon.textContent = icon;
+    toast.classList.remove('translate-y-20', 'opacity-0');
+    toast.classList.add('translate-y-0', 'opacity-100');
+
+    setTimeout(() => {
+      toast.classList.remove('translate-y-0', 'opacity-100');
+      toast.classList.add('translate-y-20', 'opacity-0');
+    }, 2800);
+  }
+
+  // Navigation to Inspector
+  function navigateToInspector() {
+    // Switch active sidebar item
+    document.querySelectorAll('.nav-item').forEach(el => {
+      el.classList.remove('bg-indigo-50', 'border', 'border-indigo-100', 'text-indigo-700', 'font-semibold', 'shadow-xs');
+      el.classList.add('text-slate-600', 'font-medium');
+      const icon = el.querySelector('.material-symbols-outlined');
+      if (icon) icon.classList.replace('text-indigo-600', 'text-slate-400');
+    });
+
+    const inspectorBtn = document.querySelector('[data-tab="inspector"]');
+    if (inspectorBtn) {
+      inspectorBtn.classList.add('bg-indigo-50', 'border', 'border-indigo-100', 'text-indigo-700', 'font-semibold', 'shadow-xs');
+      inspectorBtn.classList.remove('text-slate-600', 'font-medium');
+      const icon = inspectorBtn.querySelector('.material-symbols-outlined');
+      if (icon) icon.classList.replace('text-slate-400', 'text-indigo-600');
+    }
+
+    document.getElementById('activeBreadcrumb').textContent = '컨텍스트 Diff 인스펙터 (/inspector)';
+    showToast('컨텍스트 Diff 인스펙터 뷰로 전환되었습니다.', 'difference');
+  }
+
+  // Sidebar navigation handler
+  document.querySelectorAll('.nav-item').forEach(button => {
+    button.addEventListener('click', (e) => {
+      document.querySelectorAll('.nav-item').forEach(el => {
+        el.classList.remove('bg-indigo-50', 'border', 'border-indigo-100', 'text-indigo-700', 'font-semibold', 'shadow-xs');
+        el.classList.add('text-slate-600', 'font-medium');
+        const icon = el.querySelector('.material-symbols-outlined');
+        if (icon) {
+          icon.classList.remove('text-indigo-600');
+          icon.classList.add('text-slate-400');
+        }
+      });
+
+      const current = e.currentTarget;
+      current.classList.add('bg-indigo-50', 'border', 'border-indigo-100', 'text-indigo-700', 'font-semibold', 'shadow-xs');
+      current.classList.remove('text-slate-600', 'font-medium');
+      const currentIcon = current.querySelector('.material-symbols-outlined');
+      if (currentIcon) {
+        currentIcon.classList.remove('text-slate-400');
+        currentIcon.classList.add('text-indigo-600');
+      }
+
+      const tab = current.dataset.tab;
+      const tabNames = {
+        'chat': 'Web3 Strategy Pipeline',
+        'inspector': '컨텍스트 Diff 인스펙터',
+        'decisions': '결정 및 이력 관리 (#DEC-042)',
+        'settings': '로컬 환경 및 모델 설정'
+      };
+      document.getElementById('activeBreadcrumb').textContent = tabNames[tab] || 'Web3 Strategy Pipeline';
+      showToast(`${tabNames[tab]} 탭으로 이동했습니다.`, 'check_circle');
+    });
+  });
+
+  // Decision toggle logic and smart keyword trigger
+  const decisionToggle = document.getElementById('decisionToggle');
+  const decisionRegisterPanel = document.getElementById('decisionRegisterPanel');
+  const decisionBadgeText = document.getElementById('decisionBadgeText');
+  const textarea = document.getElementById('chatTextarea');
+  const charCount = document.getElementById('charCount');
+
+  function checkDecisionIntent(text) {
+    const isKeyword = text.includes('이 프로젝트는') || text.includes('결정:') || text.includes('결정 수정:') || text.includes('채택한다');
+    if (isKeyword || decisionToggle.checked) {
+      decisionRegisterPanel.classList.remove('hidden');
+      decisionBadgeText.textContent = '#DEC 등록 모드';
+    } else {
+      decisionRegisterPanel.classList.add('hidden');
+      decisionBadgeText.textContent = '일반 질문 모드';
+    }
+  }
+
+  if (decisionToggle) {
+    decisionToggle.addEventListener('change', () => {
+      checkDecisionIntent(textarea.value);
+    });
+  }
+
+  if (textarea && charCount) {
+    textarea.addEventListener('input', (e) => {
+      const len = e.target.value.length;
+      charCount.textContent = `${len} / 4000`;
+      checkDecisionIntent(e.target.value);
+    });
+
+    textarea.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey || !e.shiftKey) && e.key === 'Enter') {
+        e.preventDefault();
+        handleSendMessage();
+      }
+    });
+  }
+
+  function promptAddTag() {
+    const tag = prompt('추가할 토픽 태그를 입력하세요 (예: #스토리지, #가스비):', '#');
+    if (tag && tag.trim().length > 1) {
+      showToast(`태그 ${tag.trim()}가 추가되었습니다.`);
+    }
+  }
+
+  // Dynamic Send Message & Assistant Response
+  function handleSendMessage() {
+    if (!textarea) return;
+    const msg = textarea.value.trim();
+    if (!msg) return;
+
+    const chatStream = document.getElementById('chatStream');
+    const isDecisionMode = decisionToggle.checked || !decisionRegisterPanel.classList.contains('hidden');
+
+    const now = new Date();
+    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+
+    // Create User Message Bubble
+    const userArticle = document.createElement('article');
+    userArticle.className = 'flex flex-col gap-space-xs max-w-4xl animate-fadeIn';
+    userArticle.innerHTML = `
+      <div class="flex items-center justify-between font-label-sm text-label-sm text-slate-500">
+        <div class="flex items-center gap-space-xs">
+          <div class="w-6 h-6 rounded bg-slate-800 text-white flex items-center justify-center font-code-inline text-[11px] font-bold shadow-xs">
+            <span class="material-symbols-outlined text-[14px]">person</span>
+          </div>
+          <span class="text-slate-900 font-bold">Engineer</span>
+          <span class="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 font-label-sm text-[10px] font-bold uppercase tracking-wider">OPERATOR</span>
+          <span class="text-slate-400 font-code-inline">${timeStr}</span>
+        </div>
+        ${isDecisionMode ? `
+          <span class="px-2 py-0.5 rounded bg-indigo-50 border border-indigo-200 text-indigo-700 font-label-sm text-label-sm font-semibold flex items-center gap-1 shadow-xs">
+            <span class="material-symbols-outlined text-[13px] text-indigo-600">gavel</span>
+            신규 결정 요청
+          </span>` : `
+          <span class="font-code-inline text-slate-400 text-label-sm">질문 디스패치 완료</span>`}
+      </div>
+      <div class="p-space-md rounded-xl bg-slate-100/90 border border-slate-300 text-slate-900 shadow-xs flex flex-col gap-space-xs">
+        <p class="font-body-md text-body-md text-slate-900 font-semibold">${msg}</p>
+        <div class="flex items-center justify-between pt-space-xs font-label-sm text-label-sm text-slate-500 border-t border-slate-200/80">
+          <span class="flex items-center gap-1 text-emerald-700 font-medium">
+            <span class="material-symbols-outlined text-[14px]">verified</span>
+            ${isDecisionMode ? '로컬 규칙 커밋 대기' : '의도 분석 및 규칙 대조 파이프라인 전송'}
+          </span>
+          <span class="font-code-inline text-slate-500">지연시간 측정 중...</span>
+        </div>
+      </div>
+    `;
+
+    chatStream.appendChild(userArticle);
+    chatStream.scrollTop = chatStream.scrollHeight;
+
+    // Reset Input
+    textarea.value = '';
+    charCount.textContent = '0 / 4000';
+    if (decisionToggle.checked) decisionToggle.checked = false;
+    decisionRegisterPanel.classList.add('hidden');
+    decisionBadgeText.textContent = '일반 질문 모드';
+
+    // Simulate Agent Response after 800ms
+    setTimeout(() => {
+      const aiArticle = document.createElement('article');
+      aiArticle.className = 'flex flex-col gap-space-xs max-w-4xl self-end w-full animate-fadeIn';
+      aiArticle.innerHTML = `
+        <div class="flex items-center justify-between font-label-sm text-label-sm flex-row-reverse">
+          <div class="flex items-center gap-space-xs">
+            <div class="w-6 h-6 rounded bg-indigo-600 text-white flex items-center justify-center font-bold shadow-xs ring-2 ring-indigo-200">
+              <span class="material-symbols-outlined text-[15px]">psychology</span>
+            </div>
+            <span class="text-indigo-900 font-bold">ContextPulse Assistant</span>
+            <span class="px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 font-label-sm text-[10px] font-bold flex items-center gap-0.5">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>검증 통과
+            </span>
+          </div>
+          <div class="flex items-center gap-space-xs font-code-inline text-label-sm text-slate-400">
+            <span>응답 지연: 410ms</span>
+          </div>
+        </div>
+        <div class="p-space-lg rounded-xl bg-white border-2 border-indigo-200/90 text-slate-900 shadow-sm flex flex-col gap-space-sm">
+          <div class="flex items-center justify-between border-b border-slate-100 pb-2">
+            <h4 class="font-headline-sm text-headline-sm text-slate-900 font-bold">
+              ${isDecisionMode ? '신규 결정 색인 및 검증 확인 완료' : '프롬프트 규칙 정합성 검토 결과'}
+            </h4>
+            <span class="px-2 py-0.5 rounded bg-emerald-50 border border-emerald-200 font-code-inline text-[11px] font-semibold text-emerald-800">
+              충돌 0건
+            </span>
+          </div>
+          <p class="font-body-md text-body-md text-slate-700 leading-relaxed">
+            전송해주신 내용 ("<strong>${msg}</strong>")을 기존 규칙 베이스(#DEC-001, #DEC-004, #DEC-042)와 대조 완료했습니다. 기존 원칙과 상충 없이 유효하게 처리되었습니다.
+          </p>
+          <div class="p-2 rounded bg-slate-50 border border-slate-200 text-slate-600 font-body-sm text-[12px] flex items-center justify-between">
+            <span>• 로컬 SQLite 상태: 즉시 동기화됨</span>
+            <span class="text-indigo-700 font-semibold">출처 추적 완료 (원문 연계)</span>
+          </div>
+        </div>
+      `;
+      chatStream.appendChild(aiArticle);
+      chatStream.scrollTop = chatStream.scrollHeight;
+      showToast('새 응답이 추가되었습니다.');
+    }, 700);
+  }
+
+  // Header New Chat Button listener
+  document.getElementById('btnNewChat').addEventListener('click', () => {
+    showToast('새 세션이 로컬 DB에 준비되었습니다.', 'refresh');
+  });
+</script>
+</main></div>
+
+</body></html>
+
+<!-- 실제 전달된 컨텍스트 비교 인스펙터 - 전달 입력 및 결과 구분 뷰 -->

@@ -1,0 +1,14 @@
+*
+!Dockerfile
+!package.json
+!package-lock.json
+!tailwind.config.cjs
+!LICENSE
+!src/
+!src/**
+!locales/
+!locales/**
+!scripts/
+!scripts/**
+!public/
+!public/**

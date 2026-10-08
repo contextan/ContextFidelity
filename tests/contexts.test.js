@@ -1,0 +1,127 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { Store } from '../src/store.js';
+import { selectMaterials, selectContext, executeRun, compareSnapshots } from '../src/pipeline.js';
+import { createApp } from '../src/server.js';
+
+function setup(t) {
+  const dir = mkdtempSync(join(tmpdir(), 'contextpulse-contexts-'));
+  const store = new Store(dir), project = store.projects()[0], session = store.sessions(project.id)[0];
+  t.after(() => { store.close(); rmSync(dir, { recursive: true, force: true }); });
+  const add = (changes = {}) => store.saveContext(project.id, { title: '제품 배경', content: '현재 서비스의 사용자 문제', kind: 'background', scope: 'project', topics: [], include_mode: 'auto', ...changes });
+  return { store, project, session, add };
+}
+test('context automatic selection respects topics, always/off modes and project boundaries', t => {
+  const { store, project, session, add } = setup(t);
+  const global = add(), matched = add({ scope: 'topic', topics: ['제품'] });
+  const unrelated = add({ scope: 'topic', topics: ['디자인'] });
+  const pinned = add({ scope: 'topic', topics: ['디자인'], include_mode: 'always' });
+  const off = add({ include_mode: 'off' });
+  const other = store.createProject('다른 프로젝트');
+  store.saveContext(other.id, { ...global, title: '다른 프로젝트 기밀', topics: [], source_id: null });
+  const result = selectMaterials(store, session.id, ['제품']);
+  assert.deepEqual(new Set(result.selected.map(c => c.id)), new Set([global.id, matched.id, pinned.id]));
+  assert.ok(result.excluded.some(c => c.id === unrelated.id && c.selection_reason.includes('주제')));
+  assert.ok(result.excluded.some(c => c.id === off.id && c.selection_reason.includes('꺼짐')));
+  assert.equal(store.contexts(project.id).length, 5);
+});
+test('manual selection affects only one conversation and cannot exclude mandatory decisions', t => {
+  const { store, session, project, add } = setup(t);
+  const item = add({ scope: 'topic', topics: ['디자인'], include_mode: 'off' });
+  const otherSession = store.createSession(project.id);
+  store.setOverride(session.id, item.id, 'include');
+  assert.equal(selectMaterials(store, session.id, ['제품']).selected.length, 1);
+  assert.equal(selectMaterials(store, otherSession.id, ['제품']).selected.length, 0);
+  const d = store.register(session.id, '항상 지킬 사용자 결정', []).decision;
+  const question = store.addMessage(session.id, 'user', '질문', ['제품']);
+  store.setOverride(session.id, item.id, 'exclude');
+  assert.equal(selectContext(store, session.id, question).materials.selected.length, 0);
+  assert.ok(selectContext(store, session.id, question).active.some(active => active.id === d.id));
+  store.setOverride(session.id, item.id, 'auto');
+  assert.equal(store.overrides(session.id).length, 0);
+});
+test('context edits add versions, preserve per-chat selection and frozen model requests', async t => {
+  const { store, session, project, add } = setup(t);
+  const v1 = add({ kind: 'hypothesis', content: '검토 중인 가설 하나', include_mode: 'off' });
+  store.setOverride(session.id, v1.id, 'include');
+  const message1 = store.addMessage(session.id, 'user', '첫 질문', []);
+  const run1 = await executeRun(store, null, session.id, message1, { provider: 'demo', model: 'context-demo' });
+  const bytes = run1.snapshots[0].payload;
+  assert.ok(bytes.includes('검토 중인 가설 하나'));
+  const v2 = store.saveContext(project.id, { ...v1, content: '검토 중인 가설 둘' }, v1.id);
+  assert.equal(v2.version, 2); assert.equal(v2.root_id, v1.root_id);
+  assert.equal(store.context(v1.id).status, 'superseded');
+  assert.equal(store.contextVersions(v2.id).length, 2);
+  assert.equal(selectMaterials(store, session.id, []).selected[0].id, v2.id);
+  const message2 = store.addMessage(session.id, 'user', '둘째 질문', []);
+  const run2 = await executeRun(store, null, session.id, message2, { provider: 'demo', model: 'context-demo' });
+  assert.equal(store.run(run1.id).snapshots[0].payload, bytes);
+  const diff = compareSnapshots(run1.snapshots[0], run2.snapshots[0]);
+  assert.ok(diff.changed.some(block => block.key === `CONTEXT:${v1.root_id}`));
+  assert.throws(() => store.saveContext(project.id, { ...v1, content: '오래된 편집' }, v1.id), /현재 버전/);
+});
+test('archived contexts stay excluded despite an explicit include override; restore is supported', t => {
+  const { store, session, add } = setup(t);
+  const item = add();
+  store.setOverride(session.id, item.id, 'include');
+  store.archiveContext(item.id, true);
+  assert.equal(selectMaterials(store, session.id, []).selected.length, 0);
+  assert.match(selectMaterials(store, session.id, []).excluded[0].selection_reason, /보관/);
+  assert.throws(() => store.setOverride(session.id, item.id, 'include'), /사용 중/);
+  store.archiveContext(item.id, false);
+  assert.equal(selectMaterials(store, session.id, []).selected.length, 1);
+});
+test('captured message cannot return through automatic history after its context is excluded', t => {
+  const { store, session, add } = setup(t);
+  const source = store.addMessage(session.id, 'user', '이 자료는 제외할 원문입니다.', ['제품']);
+  const item = add({ source_id: source.id, content: source.content });
+  store.setOverride(session.id, item.id, 'exclude');
+  const question = store.addMessage(session.id, 'user', '다음 질문', ['제품']);
+  const context = selectContext(store, session.id, question);
+  assert.ok(!JSON.stringify(context.blocks).includes(source.content));
+  assert.equal(store.message(source.id).content, source.content);
+  assert.ok(context.excluded.some(c => c.id === item.id));
+});
+test('context origin and per-chat overrides cannot cross project boundaries', t => {
+  const { store, session, project, add } = setup(t);
+  const item = add(), other = store.createProject('별도 프로젝트'), otherSession = store.sessions(other.id)[0];
+  const source = store.addMessage(otherSession.id, 'user', '다른 프로젝트 원문', []);
+  assert.throws(() => store.saveContext(project.id, { ...item, source_id: source.id }), /같은 프로젝트/);
+  assert.throws(() => store.setOverride(otherSession.id, item.id, 'include'), /같은 프로젝트/);
+  assert.throws(() => store.saveContext(other.id, { ...item }, item.id), /현재 버전/);
+  assert.equal(store.contexts(other.id).length, 0);
+});
+
+test('HTTP context management feeds exact selected versions into requests and exports', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'contextpulse-context-http-'));
+  const port = 21000 + Math.floor(Math.random() * 1000), app = createApp({ port, directory: dir });
+  await new Promise(resolve => app.server.listen(port, '127.0.0.1', resolve));
+  t.after(async () => { await new Promise(resolve => app.server.close(resolve)); app.store.close(); rmSync(dir, { recursive: true, force: true }); });
+  const state = await (await fetch(`${app.origin}/api/state`)).json();
+  const call = async (path, data) => {
+    const response = await fetch(`${app.origin}/api${path}`, { method: data ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', 'X-ContextPulse-Token': state.csrf }, ...(data ? { body: JSON.stringify(data) } : {}) });
+    assert.ok(response.ok, `${path}: ${response.status}`);
+    return response.json();
+  };
+  const project = await call(`/projects/${state.projects[0].id}`), session = project.sessions[0];
+  const v1 = await call(`/projects/${project.project.id}/contexts`, { title: '검증 가설', content: '아직 확인되지 않은 제품 가설', kind: 'hypothesis', scope: 'topic', topics: ['제품'], include_mode: 'auto' });
+  assert.equal((await call(`/sessions/${session.id}/context-preview`, { topics: ['디자인'] })).selected.length, 0);
+  await call(`/sessions/${session.id}/context-selection`, { context_id: v1.id, mode: 'include' });
+  assert.equal((await call(`/sessions/${session.id}/context-preview`, { topics: ['디자인'] })).selected[0].id, v1.id);
+  const v2 = await call(`/contexts/${v1.id}`, { ...v1, content: '원문을 보존하면서 수정한 제품 가설' });
+  await call('/settings', { provider: 'demo', model: 'context-demo' });
+  const result = await call(`/sessions/${session.id}/messages`, { content: '선택한 맥락 확인', topics: ['디자인'] });
+  // Demo calls finish in microtasks; retrieve completed records after the HTTP request.
+  const run = await call(`/runs/${result.run_id}`);
+  const block = run.snapshots[0].blocks.find(b => b.context_id === v2.id);
+  assert.ok(block); assert.equal(block.version, 2);
+  assert.ok(run.snapshots[0].payload.includes(v2.content));
+  const exported = await call('/export');
+  assert.equal(exported.tables.contexts.length, 2);
+  assert.equal(exported.tables.context_overrides.length, 1);
+  await call(`/contexts/${v2.id}/archive`, { archived: true });
+  assert.equal((await call(`/sessions/${session.id}/context-preview`, { topics: ['디자인'] })).selected.length, 0);
+});

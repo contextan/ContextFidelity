@@ -1,0 +1,20 @@
+{
+  "name": "contextpulse",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test tests/*.test.js",
+    "build:css": "tailwindcss -c tailwind.config.cjs -i public/base.css -o public/styles.css --minify",
+    "build:locales": "node scripts/build-locales.js",
+    "build": "npm run build:locales && npm run build:css"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.0",
+    "tailwindcss": "^4.3.0"
+  }
+}

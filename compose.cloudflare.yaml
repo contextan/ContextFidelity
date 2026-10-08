@@ -1,0 +1,33 @@
+# Separate configuration: starts a public tunnel ONLY when explicitly run.
+name: contextpulse-public
+services:
+  app:
+    build: .
+    image: contextpulse:prototype
+    environment:
+      CONTEXTPULSE_MODE: hosted
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?Set the exact HTTPS demo origin}
+    volumes:
+      - demo-data:/app/data
+    init: true
+    stop_grace_period: 40s
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 512m
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run --token-file /run/secrets/tunnel_token
+    secrets:
+      - tunnel_token
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+secrets:
+  tunnel_token:
+    file: ${TUNNEL_TOKEN_FILE:?Set a protected tunnel token file path}
+volumes:
+  demo-data:
