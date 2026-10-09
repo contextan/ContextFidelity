@@ -1,4 +1,4 @@
-const CLIENT_BUILD_ID = '99e69e87a9ab';
+const CLIENT_BUILD_ID = 'f94038fea717';
 const LOCALE = /^\/ko(?:\/|$)/.test(location.pathname) ? 'ko' : 'en';
 const DATE_LOCALE = LOCALE === 'ko' ? 'ko-KR' : 'en-US';
 const PAGE_ROUTES = { chat: '', contexts: 'contexts', settings: 'settings', inspector: 'records' };

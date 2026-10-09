@@ -296,7 +296,9 @@ test('user facts and assistant proposals register without buttons and feed only 
   const settings = { provider: 'ollama', model: 'test', autoContext: true };
   const first = await executeRun(store, provider, session.id, question, settings);
   const frozen = contextUsage(first);
+  assert.deepEqual(first.snapshots.map(snapshot => snapshot.phase), ['generation', 'extraction']);
   assert.equal(frozen.contexts.length, 0);
+  assert.equal(first.snapshots.find(snapshot => snapshot.phase === 'generation').blocks.some(block => block.context_id), false);
   assert.equal(store.contexts(project.id).length, 2);
   assert.ok(store.contexts(project.id).every(c => c.registration === 'automatic' && c.run_id === first.id));
   assert.equal(store.decisions(project.id).length, 0);
@@ -306,6 +308,58 @@ test('user facts and assistant proposals register without buttons and feed only 
   assert.deepEqual(contextUsage(store.run(first.id)), frozen);
   assert.equal(store.contexts(project.id).length, 2); // exact-source deduplication
   assert.ok(!readFileSync(new URL('../src/client.js', import.meta.url), 'utf8').includes("button('컨텍스트로 저장'"));
+});
+
+test('a first-turn answer stays context-free while both sides of the conversation are saved for later', async t => {
+  const { store, project, session } = fixture(t);
+  const firstQuestion = store.addMessage(session.id, 'user', '내 이름은 이은룡이고 개발자가 되고 싶어.', []);
+  const secondQuestion = '개발자가 되려면 무엇부터 배우면 좋을까?';
+  const phases = [];
+  const provider = { call: async request => {
+    const instruction = request.payload.messages[0].content;
+    if (instruction.startsWith('질문에 필요한')) {
+      phases.push('selection');
+      const latest = store.messages(session.id).filter(message => message.role === 'user').at(-1);
+      const candidates = store.contexts(project.id);
+      return { text: JSON.stringify({
+        topics: ['개발 진로'],
+        contexts: candidates.map(item => ({ id: item.id, include: true, reason: '개발 진로에 관련된 정보' })),
+        // Reproduce a selector that proposes saving the current utterance.
+        registrations: [{ title: '현재 질문', content: latest.content, kind: 'background', scope: 'topic', topics: ['개발 진로'], source_id: latest.id, supersedes: null }]
+      }) };
+    }
+    if (instruction.startsWith('사용자 대화 원문')) {
+      phases.push('extraction');
+      const latestUser = store.messages(session.id).filter(message => message.role === 'user').at(-1);
+      const latestAssistant = store.messages(session.id).filter(message => message.role === 'assistant').at(-1);
+      return { text: JSON.stringify({ candidates: [
+        { title: '개발자 목표', content: firstQuestion.content, kind: 'background', scope: 'topic', topics: ['개발 진로'], source_id: firstQuestion.id },
+        { title: '학습 제안', content: latestAssistant.content, kind: 'hypothesis', scope: 'topic', topics: ['개발 진로'], source_id: latestAssistant.id },
+        ...(latestUser.id === firstQuestion.id ? [] : [{ title: '개발 학습 질문', content: latestUser.content, kind: 'background', scope: 'topic', topics: ['개발 진로'], source_id: latestUser.id }])
+      ] }) };
+    }
+    phases.push('generation');
+    return { text: store.messages(session.id).filter(message => message.role === 'user').at(-1).id === firstQuestion.id
+      ? '좋은 목표예요. 작은 웹 프로젝트를 하나 정해 만들어 보면서 JavaScript 기초와 Git을 함께 익혀보세요.'
+      : '먼저 HTML, CSS, JavaScript 기초를 익히고 작은 웹 페이지를 만들어 보세요. 그다음 Git과 백엔드 기초를 더하면 좋습니다.' };
+  } };
+  const settings = { provider: 'ollama', model: 'test', autoContext: true };
+
+  const first = await executeRun(store, provider, session.id, firstQuestion, settings);
+  assert.deepEqual(phases, ['generation', 'extraction']);
+  assert.equal(contextUsage(first).contexts.length, 0);
+  assert.equal(first.snapshots.find(snapshot => snapshot.phase === 'generation').blocks.some(block => block.context_id), false);
+  assert.match(store.message(first.assistant_message_id).content, /작은 웹 프로젝트/);
+  assert.equal(store.contexts(project.id).length, 2); // User background and assistant proposal are stored after the answer.
+
+  const next = store.addMessage(session.id, 'user', secondQuestion, []);
+  phases.length = 0;
+  const second = await executeRun(store, provider, session.id, next, settings);
+  const generation = second.snapshots.find(snapshot => snapshot.phase === 'generation');
+  assert.deepEqual(phases, ['selection', 'generation', 'extraction']);
+  assert.ok(generation.blocks.some(block => block.context_id && block.source_id === firstQuestion.id));
+  assert.ok(!generation.blocks.some(block => block.context_id && block.source_id === next.id));
+  assert.equal(store.contexts(project.id).length, 4); // The second turn's user and assistant context are saved for following turns.
 });
 
 test('a revised criterion is registered during selection and validated in the current answer', async t => {
