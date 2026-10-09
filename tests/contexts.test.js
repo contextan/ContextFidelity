@@ -97,7 +97,7 @@ test('context origin and per-chat overrides cannot cross project boundaries', t 
 
 test('HTTP context management feeds exact selected versions into requests and exports', async t => {
   const dir = mkdtempSync(join(tmpdir(), 'contextpulse-context-http-'));
-  const port = 21000 + Math.floor(Math.random() * 1000), app = createApp({ port, directory: dir });
+  const port = 21000 + Math.floor(Math.random() * 1000), app = createApp({ port, directory: dir, testOnlyProviders: ['demo'] });
   await new Promise(resolve => app.server.listen(port, '127.0.0.1', resolve));
   t.after(async () => { await new Promise(resolve => app.server.close(resolve)); app.store.close(); rmSync(dir, { recursive: true, force: true }); });
   const state = await (await fetch(`${app.origin}/api/state`)).json();

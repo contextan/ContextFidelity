@@ -1,6 +1,6 @@
 # Colosseum 제출 준비 체크리스트
 
-기준일: 2026-10-08. 현재 제품 및 검증 현황은 [프로젝트 정리](project-summary.md)를 기준으로 합니다.
+기준일: 2026-10-09. 현재 제품 및 검증 현황은 [프로젝트 정리](project-summary.md)를 기준으로 합니다.
 
 ## 제출 판단
 
@@ -15,8 +15,9 @@ Colosseum의 2026 Crypto World’s Fair는 모든 블록체인 생태계의 프�
 - [ ] GitHub 저장소가 공개 상태인지 확인하고, README 첫 화면에서 제품과 실행 방법을 바로 이해할 수 있게 합니다.
 - [ ] 저장소에 개인 대화 DB, OAuth 자격 증명, API 키, 로컬 로그가 포함되지 않았는지 마지막으로 확인합니다.
 - [ ] Cloudflare Tunnel과 영구 저장소를 연결해 HTTPS 공개 데모를 엽니다.
+- [ ] 공개 HTTPS 데모를 열기 전에 OpenAI에 웹 OAuth 클라이언트와 정확한 callback URL을 등록합니다. OSS OAuth의 `127.0.0.1` 콜백은 공개 사이트에 사용할 수 없습니다.
 - [ ] 완전히 새 브라우저 세션으로 방문자 데이터 격리, 쿠키, 새로고침·재시작 후 동작을 확인합니다.
-- [ ] 심사위원이 API 키를 넣지 않고 흐름을 볼 수 있는 데모 경로를 준비합니다. 데모 데이터는 고정 시연임을 명확히 표시합니다.
+- [ ] 등록된 OAuth로 심사위원이 자기 ChatGPT 계정에 로그인해 일반 채팅과 컨텍스트 흐름을 직접 사용하도록 합니다. 고정 교정 사례는 실제 모델을 호출하지 않는 별도 시연임을 표시합니다.
 
 ### P1 — 제품의 차이를 짧게 증명하기
 
@@ -35,7 +36,7 @@ Colosseum의 2026 Crypto World’s Fair는 모든 블록체인 생태계의 프�
 
 1. 대상 사용자와 반복되는 문제: 여러 프로젝트·주제를 넘나드는 장기 AI 대화에서 맥락이 뒤섞이거나 이미 정정한 내용이 되살아납니다.
 2. ContextPulse의 접근: 질문별 자동 주제 파악, 필요한 맥락만 요청에 포함, 답변별 실제 전달 영수증과 원문 추적.
-3. 초기 검증: 실제 모델로 주제 전환 6턴을 확인했고, 자동 테스트 53개가 통과했습니다. 이는 제품 흐름 검증이지 사용자 수요나 정확도 벤치마크는 아닙니다.
+3. 초기 검증: 실제 모델로 주제 전환 6턴을 확인했고, 자동 테스트 60개가 통과했습니다. 이는 제품 흐름 검증이지 사용자 수요나 정확도 벤치마크는 아닙니다.
 4. 다음 검증: 암호화폐 제품을 만드는 개발자·팀에게 사용성 인터뷰와 반복 사용 테스트를 진행하고, 맥락 혼입 수정 시간과 재설명 횟수가 줄어드는지 측정합니다. 현재 전달된 진행현황에는 인터뷰 결과가 포함되어 있지 않으므로, 이미 진행했다면 인원·의견·반영한 변경을 제출 자료에 기록합니다.
 5. 팀의 관련 경험, 이 문제를 선택한 이유, 다음 제품 단계와 배포 계획.
 
@@ -59,11 +60,11 @@ Colosseum의 2026 Crypto World’s Fair는 모든 블록체인 생태계의 프�
 
 **Brief description:**
 
-> ContextPulse is a local-first chat workspace that automatically selects project context for each question and shows the exact context sent with every answer. It keeps topics separate, captures useful context from conversation, and preserves source-linked call receipts so builders can inspect what was sent and catch cross-topic leakage. It works with ChatGPT OAuth, OpenAI API, and local Ollama models.
+> ContextPulse is a ChatGPT-powered workspace that automatically selects project context for each question and shows the exact context sent with every answer. It keeps topics separate, captures useful context from conversation, and preserves source-linked receipts so builders can inspect what was sent and catch cross-topic leakage.
 
 **Chains and tools:**
 
-> No blockchain integration is implemented in this prototype. ContextPulse integrates ChatGPT OAuth, OpenAI-compatible model APIs, local Ollama models, and SQLite. The initial target users are crypto product teams that use AI throughout research, design, and shipping.
+> No blockchain integration is implemented in this prototype. ContextPulse integrates ChatGPT OAuth and SQLite. The initial target users are crypto product teams that use AI throughout research, design, and shipping.
 
 체인 연동을 구현하지 않았다면 그대로 밝힙니다. 공식 FAQ는 모든 생태계의 프로젝트가 상금 대상이라고 안내하지만, 심사는 제품 실행·시장·실행 가능성과 팀의 통찰도 평가합니다. 따라서 암호화폐 팀을 첫 사용자로 삼는 이유와 실제 사용자 피드백을 확보하는 것이 중요합니다. [공식 FAQ 및 심사 기준](https://colosseum.com/hackathon?year=fall2026)
 
@@ -74,15 +75,15 @@ Colosseum의 2026 Crypto World’s Fair는 모든 블록체인 생태계의 프�
 - [ ] 처음 온 사용자가 빈 화면이나 개발용 테스트 기록을 보지 않습니다.
 - [ ] 모델 연결을 못 해도 안내된 데모 경로에서 핵심 흐름을 볼 수 있습니다.
 - [ ] 사용된 컨텍스트 영수증이 실제 저장된 요청 입력과 일치하고 원문 근거가 열립니다.
-- [ ] hosted mode에서 방문자 간 대화와 API 키가 분리됩니다.
+- [ ] hosted mode에서 방문자 간 대화와 OAuth 자격 증명이 분리됩니다.
 - [ ] 제출에 기재한 GitHub 링크와 영상 링크가 로그아웃 상태에서도 열립니다.
 - [ ] 기존 코드·개발 이력과 해커톤 기간에 새로 만든 작업을 사실대로 구분합니다. Colosseum은 해커톤 이전 코드 사용을 허용하지만, 관련 과거 개발을 공개하도록 안내합니다.
 - [ ] 제출 폼에서 팀원, 위치, 로고, GTM, 수요 검증, 향후 배포 계획을 빠짐없이 채웁니다.
 
 ## 현재 남은 차단 요소
 
-1. Cloudflare 공개 터널·도메인·HTTPS가 아직 연결되지 않았습니다.
-2. 실제 도메인에서 Secure cookie와 방문자 격리를 검증하지 않았습니다.
-3. GitHub CLI가 이 환경에서 인증되어 있지 않아 원격 저장소 공개·푸시 여부를 확인해야 합니다.
-4. 전달된 진행현황에 사용자 인터뷰와 수요 검증 결과가 없습니다. 이미 진행한 검증이 있다면 근거를 추가하고, 자동 테스트 통과 수를 시장 검증으로 표현하지 않습니다.
+1. 공개 HTTPS 주소에서 ChatGPT OAuth를 사용하려면 OpenAI 웹 로그인 클라이언트 등록이 필요합니다. OpenAI는 웹 로그인을 현재 일부 파트너에 제공한다고 안내합니다.
+2. Cloudflare 공개 터널·도메인·HTTPS와 실제 도메인의 Secure cookie·방문자 격리는 아직 확인하지 않았습니다.
+3. GitHub 저장소 상태와 최신 push 여부를 확인해야 합니다.
+4. 전달된 진행현황에 사용자 인터뷰와 수요 검증 결과가 없습니다. 자동 테스트 통과 수를 시장 검증으로 표현하지 않습니다.
 5. 임베딩 검색, 긴 기록 전체 검색, 외부 대화 가져오기·삭제, 독립된 검증 모델은 후속 범위입니다. 마감 전 범위를 넓히기보다 핵심 흐름과 공개 접근성을 완성합니다.

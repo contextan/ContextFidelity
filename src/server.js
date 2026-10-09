@@ -1,5 +1,5 @@
 import { WorkspaceManager } from './workspaces.js';
-import { serverConfig } from './config.js';
+import { serverConfig, supportsLoopbackChatGptOAuth } from './config.js';
 import { backup } from 'node:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -43,10 +43,11 @@ async function body(req) {
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch { throw new Error('올바른 JSON 요청이 아닙니다.'); }
 }
 
-export function createApp({ port = 8899, directory = join(root, 'data'), fetcher = fetch, mode = 'local', publicOrigin = `http://127.0.0.1:${port}`, workspaceOptions } = {}) {
+export function createApp({ port = 8899, directory = join(root, 'data'), fetcher = fetch, mode = 'local', publicOrigin = `http://127.0.0.1:${port}`, workspaceOptions, testOnlyProviders = [] } = {}) {
   const config = serverConfig({ CONTEXTPULSE_MODE: mode, CONTEXTPULSE_PORT: String(port), PUBLIC_ORIGIN: publicOrigin, CONTEXTPULSE_DATA_DIR: directory }, root);
   const origin = mode === 'hosted' ? config.publicOrigin : `http://127.0.0.1:${port}`;
   const hosted = mode === 'hosted';
+  const oauthAvailable = !hosted || supportsLoopbackChatGptOAuth(origin);
   const manager = hosted ? new WorkspaceManager(directory, origin, fetcher, workspaceOptions) : null;
   const localStore = hosted ? null : new Store(directory);
   const localAuth = hosted ? null : new Auth(directory, origin, fetcher);
@@ -92,8 +93,8 @@ export function createApp({ port = 8899, directory = join(root, 'data'), fetcher
         if (hosted && (busy.size >= 2 || manager.busyCount() >= 8)) throw Object.assign(new Error('Demo is busy. Please try again shortly.'), { status: 429 });
         if (hosted && (store.db.prepare('SELECT COUNT(*) n FROM messages').get().n >= 20000 || statSync(store.path).size > 128 * 1024 * 1024)) throw Object.assign(new Error('Visitor storage limit reached.'), { status: 429 });
       };
-      const allowedProviders = hosted ? ['openai', 'demo'] : ['chatgpt', 'openai', 'ollama', 'demo'];
-      const checkProvider = (name) => { if (!allowedProviders.includes(name)) throw Object.assign(new Error('This connection is available only in the local app. The web demo supports demo mode or your own API key.'), { status: 400 }); };
+      const allowedProviders = oauthAvailable ? [...new Set(['chatgpt', ...(!hosted ? testOnlyProviders.filter(name => ['openai', 'ollama', 'demo'].includes(name)) : [])])] : [];
+      const checkProvider = (name) => { if (!allowedProviders.includes(name)) throw Object.assign(new Error(oauthAvailable ? '이 연결 방식은 현재 사용할 수 없습니다. ChatGPT OAuth에 연결하세요.' : '이 사이트 주소에는 ChatGPT 로그인 클라이언트가 등록되지 않았습니다. 공개 사이트용 OpenAI 승인이 필요합니다.'), { status: 400 }); };
       const connectedSettings = (locale = 'en', session = null, requireModel = true) => {
         const settings = { ...store.settings(), locale }; checkProvider(settings.provider);
         if (session?.model && session.model_provider === settings.provider) settings.model = session.model;
@@ -101,13 +102,12 @@ export function createApp({ port = 8899, directory = join(root, 'data'), fetcher
         if (settings.provider === 'chatgpt' && !auth.publicStatus().signedIn) throw new Error('설정에서 Continue with ChatGPT로 연결하세요.');
         if (settings.provider === 'chatgpt' && !auth.planEnabled()) throw new Error('ChatGPT 플랜 사용 권한을 승인하세요.');
         if (settings.provider === 'chatgpt') settings.accountClientId = auth.account().client_id;
-        if (settings.provider === 'openai' && !auth.value.apiKey) throw new Error('설정에서 API 키를 등록하세요.');
         return settings;
       };
-      const publicState = () => ({ build_id: buildId, mode, capabilities: { providers: allowedProviders, oauth: !hosted }, projects: store.projects(), settings: store.settings(), auth: auth.publicStatus(), busy: [...busy], csrf, storage_bytes: statSync(store.path).size + (existsSync(`${store.path}-wal`) ? statSync(`${store.path}-wal`).size : 0) });
+      const publicState = () => ({ build_id: buildId, mode, capabilities: { providers: allowedProviders, oauth: oauthAvailable }, projects: store.projects(), settings: store.settings(), auth: auth.publicStatus(), busy: [...busy], csrf, storage_bytes: statSync(store.path).size + (existsSync(`${store.path}-wal`) ? statSync(`${store.path}-wal`).size : 0) });
       if (path === '/api/state' && req.method === 'GET') return json(publicState());
       if (path.startsWith('/api/') && req.headers['x-contextpulse-token'] !== csrf) return json({ error: '앱을 새로고침한 뒤 다시 시도하세요.', code: 'CSRF_RELOAD' }, 403);
-      if (hosted && ((path.startsWith('/api/auth/') && path !== '/api/auth/status') || path === '/auth/callback')) return json({ error: 'ChatGPT OAuth is available in the local app. Use demo mode or your own API key on the web.' }, 400);
+      if (!oauthAvailable && ((path.startsWith('/api/auth/') && path !== '/api/auth/status') || path === '/auth/callback')) return json({ error: '이 사이트 주소에는 ChatGPT 로그인 클라이언트가 등록되지 않았습니다.' }, 400);
       if (path === '/auth/callback' && req.method === 'GET') {
         let message, destination = 'settings'; const callbackLocale = auth.pending.get(url.searchParams.get('state'))?.locale || 'en';
         const previousAccount = auth.account()?.client_id;
@@ -251,7 +251,7 @@ export function createApp({ port = 8899, directory = join(root, 'data'), fetcher
           settings.chatgptModels[auth.account().client_id] = settings.model;
         }
         if (settings.provider === 'demo') settings.model = 'context-demo';
-        if (typeof data.apiKey === 'string' && data.apiKey.trim()) auth.setApiKey(requiredText(data.apiKey.trim(), 1000));
+        if (testOnlyProviders.includes('openai') && settings.provider === 'openai' && typeof data.apiKey === 'string' && data.apiKey.trim()) auth.setApiKey(requiredText(data.apiKey.trim(), 1000));
         store.saveSettings(settings); return json(publicState());
       }
       if (path === '/api/models' && req.method === 'POST') {

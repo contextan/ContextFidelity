@@ -29,7 +29,7 @@ test('chat model endpoint persists a selection without changing another conversa
   const directory = mkdtempSync(join(tmpdir(), 'contextpulse-session-model-'));
   const port = 24820 + Math.floor(Math.random() * 300);
   const requestedModels = [];
-  const app = createApp({ directory, port, fetcher: async (_url, options) => {
+  const app = createApp({ directory, port, testOnlyProviders: ['openai'], fetcher: async (_url, options) => {
     requestedModels.push(JSON.parse(options.body).model);
     const text = requestedModels.length === 1 ? 'Answer from this chat model.' : JSON.stringify({ verdict: 'consistent', conflicts: [], note: 'No conflict.' });
     return new Response(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ content: [{ type: 'output_text', text }] }], usage: { input_tokens: 1, output_tokens: 1 } } })}\n\n`, { headers: { 'Content-Type': 'text/event-stream' } });

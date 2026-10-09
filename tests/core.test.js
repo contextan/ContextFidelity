@@ -140,6 +140,8 @@ test('HTTP isolation, persistence and authentic SQLite export', async t => {
   t.after(async () => { await new Promise(resolve => app.server.close(resolve)); app.store.close(); rmSync(dir, { recursive: true, force: true }); });
   const initial = await (await fetch(`${app.origin}/api/state`)).json();
   const headers = { 'Content-Type': 'application/json', 'X-ContextPulse-Token': initial.csrf };
+  assert.deepEqual(initial.capabilities.providers, ['chatgpt']);
+  assert.equal((await fetch(`${app.origin}/api/settings`, { method: 'POST', headers, body: JSON.stringify({ provider: 'openai', model: 'test', apiKey: 'not-accepted' }) })).status, 400);
   assert.equal((await fetch(`${app.origin}/api/projects`, { method: 'POST', headers: { ...headers, Origin: 'https://evil.invalid' }, body: '{}' })).status, 403);
   assert.equal((await fetch(`${app.origin}/api/projects`, { method: 'POST', body: '{}' })).status, 403);
   const response = await fetch(`${app.origin}/api/demo`, { method: 'POST', headers, body: '{}' });

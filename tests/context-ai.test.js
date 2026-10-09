@@ -166,7 +166,7 @@ test('HTTP automatic registration, selected input display and export persist rea
   const directory = mkdtempSync(join(tmpdir(), 'contextpulse-ai-http-'));
   const port = 23000 + Math.floor(Math.random() * 1000);
   let source;
-  const app = createApp({ port, directory, fetcher: async () => Response.json({ done: true, message: { content: json({ candidates: [candidate(source)] }) } }) });
+  const app = createApp({ port, directory, testOnlyProviders: ['ollama', 'demo'], fetcher: async () => Response.json({ done: true, message: { content: json({ candidates: [candidate(source)] }) } }) });
   await new Promise(resolve => app.server.listen(port, '127.0.0.1', resolve));
   t.after(async () => { await new Promise(resolve => app.server.close(resolve)); app.store.close(); rmSync(directory, { recursive: true, force: true }); });
   const state = await (await fetch(`${app.origin}/api/state`)).json(), projectId = state.projects[0].id;

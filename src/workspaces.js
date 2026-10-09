@@ -46,7 +46,8 @@ export class WorkspaceManager {
       }
       const directory = join(this.directory, id), fresh = !existsSync(join(directory, 'contextpulse.sqlite'));
       const store = new Store(directory);
-      if (fresh) store.saveSettings({ provider: 'demo', model: 'context-demo', autoContext: true, ollamaUrl: 'http://127.0.0.1:11434' });
+      if (fresh) store.saveSettings({ provider: 'chatgpt', model: '', autoContext: true, ollamaUrl: 'http://127.0.0.1:11434' });
+      else if (store.settings().provider !== 'chatgpt' || store.settings().model === 'context-demo') store.saveSettings({ ...store.settings(), provider: 'chatgpt', model: '' });
       const encryptionKey = createHmac('sha256', this.key).update('visitor-credentials:' + id).digest();
       const auth = new Auth(directory, this.origin, this.fetcher, encryptionKey);
       runtime = { store, auth, provider: new Provider(auth, this.fetcher), csrf: randomBytes(32).toString('hex'), busy: new Set(), inflight: 0, requests: [] };

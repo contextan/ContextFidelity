@@ -10,3 +10,8 @@ export function serverConfig(env, root) {
   if (mode === 'hosted' && url.protocol !== 'https:' && !(url.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(url.hostname))) throw new Error('Hosted PUBLIC_ORIGIN requires HTTPS, except loopback testing');
   return { mode, port, publicOrigin, directory: env.CONTEXTPULSE_DATA_DIR || join(root, mode === 'hosted' ? 'web-data' : 'data'), host: mode === 'hosted' ? '0.0.0.0' : '127.0.0.1' };
 }
+
+export function supportsLoopbackChatGptOAuth(origin) {
+  const url = new URL(origin);
+  return url.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
+}

@@ -1,4 +1,4 @@
-const CLIENT_BUILD_ID = 'f94038fea717';
+const CLIENT_BUILD_ID = '20ec66620712';
 const LOCALE = /^\/ko(?:\/|$)/.test(location.pathname) ? 'ko' : 'en';
 const DATE_LOCALE = LOCALE === 'ko' ? 'ko-KR' : 'en-US';
 const PAGE_ROUTES = { chat: '', contexts: 'contexts', settings: 'settings', inspector: 'records' };
@@ -43,18 +43,10 @@ function countLabel(count, koLabel, enPlural, enSingular = enPlural) { return LO
 function raw(value) { return `<pre class="bg-slate-900 text-indigo-200 rounded-lg p-3 text-xs overflow-auto max-h-[600px]">${esc(typeof value === 'string' ? value : JSON.stringify(value, null, 2))}</pre>`; }
 function topicValues(value) { return [...new Set(value.split(/[,，]/).map(t => t.trim().replace(/^#/, '')).filter(Boolean))].slice(0, 12); }
 function demoNotice() { return `<div class="px-4 py-2 bg-amber-50 border-b border-amber-200 text-amber-900 text-xs">Demo record · No model call · This fixed example demonstrates the correction flow.</div>`; }
-function oauthCardHtml() {
-  if (state.mode === 'hosted') return `<section class="bg-white border border-slate-200 rounded-xl p-5 space-y-3"><h2 class="font-semibold">Public demo</h2><p class="text-sm text-slate-600">This demo works without sign-in. The default demo makes no model calls; to get live answers, configure your own API key. Conversations and context are stored separately for each visitor.</p></section>`;
-  const pending = ['pending', 'processing'].includes(oauthAttempt.status);
-  const activeAccount = state.auth.accounts.find(a => a.active);
-  const connectedAccounts = state.auth.accounts.filter(a => a.connected);
-  const status = pending ? oauthAttempt.message : state.auth.chatgptConnected ? 'Account connected' : state.auth.signedIn ? 'Plan permission required' : '';
-  return `<section id="oauth-card" class="bg-white border border-slate-200 rounded-xl p-5 space-y-4"><div class="flex flex-wrap justify-between items-start gap-3"><div><h2 class="font-semibold">ChatGPT model connection · optional</h2><p class="text-sm text-slate-500 mt-2">ChatGPT OAuth is an optional connection for live model answers and automatic context processing. Projects, conversations, and saved context remain available and manageable without signing in.</p></div>${status ? pill(status, state.auth.chatgptConnected ? 'green' : pending ? 'amber' : 'slate') : ''}</div><div class="flex flex-wrap gap-2 items-center">${state.auth.signedIn ? button('Disconnect', 'disconnect') : ''}${state.auth.chatgptConnected ? '<a href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener noreferrer" class="text-xs text-indigo-700 underline">Manage ChatGPT usage</a>' : ''}</div><p class="text-xs text-slate-500">OAuth only authenticates the model provider. Existing ChatGPT conversations are not imported.</p>
-  ${pending ? `<div role="status" class="rounded-lg bg-indigo-50 border border-indigo-200 p-3 space-y-2"><p class="text-sm text-indigo-900">${esc(oauthAttempt.message)}</p><p class="text-xs text-indigo-700">The app checks your connection after approval. If the login window did not open, use the button below.</p><div class="flex flex-wrap gap-2">${button('Continue login in this tab', 'oauth-continue')}${oauthAttempt.status === 'pending' ? button('Cancel login', 'oauth-cancel') : ''}</div></div>` : ['failed', 'expired', 'cancelled', 'permission_required'].includes(oauthAttempt.status) ? `<p role="status" class="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">${esc(oauthAttempt.message)}</p>` : ''}
-  ${connectedAccounts.length ? `<div class="space-y-2">${connectedAccounts.map(a => `<div class="p-3 rounded-lg border ${a.active ? 'border-indigo-200 bg-indigo-50' : 'border-slate-200'} flex flex-wrap justify-between items-center gap-3"><div><p class="text-sm font-medium">${esc(a.label)}</p><p class="mt-1 text-xs text-slate-500">${a.active ? 'Active account · ' : ''}${a.planEnabled ? 'ChatGPT plan access approved' : 'Plan permission required'}</p></div>${!a.active ? button('Use this account', 'choose-account', `data-client="${esc(a.client_id)}" ${pending ? 'disabled' : ''}`) : ''}</div>`).join('')}</div>` : ''}
-  ${state.auth.signedIn && activeAccount && !activeAccount.planEnabled ? '<p class="text-xs text-amber-900">If plan access is needed, continue from the bottom-left button.</p>' : ''}</section>`;
+function oauthSetupNoticeHtml() {
+  if (state.capabilities?.oauth) return '';
+  return `<section class="bg-amber-50 border border-amber-200 rounded-xl p-5 space-y-2"><h2 class="font-semibold">ChatGPT sign-in is not configured</h2><p class="text-sm text-amber-900">ChatGPT OAuth is unavailable at this public address. OpenAI website login requires a registered public callback URL. The full chat and context features are available at the local test address.</p></section>`;
 }
-function renderOAuthCard() { const card = $('#oauth-card'); if (card) card.outerHTML = oauthCardHtml(); }
 async function loadModelsForProvider(provider = state.settings.provider, force = false) {
   if (provider === 'chatgpt' && !state.auth.chatgptConnected) return;
   const accountId = provider === 'chatgpt' ? state.auth.activeClientId : null;
@@ -101,10 +93,10 @@ function watchOAuth() {
     try {
       const result = await api('/auth/status'); oauthAttempt = result.attempt; state.auth = result.auth;
       if (['connected', 'permission_required'].includes(oauthAttempt.status)) return await oauthCompleted();
-      renderOAuthCard();
+      renderShell();
       if (['pending', 'processing'].includes(oauthAttempt.status)) watchOAuth();
       else { oauthUrl = ''; toast(oauthAttempt.message || 'The login attempt ended. Please reconnect.'); }
-    } catch (error) { oauthAttempt = { status: 'failed', message: error.message }; renderOAuthCard(); }
+    } catch (error) { oauthAttempt = { status: 'failed', message: error.message }; renderShell(); }
   }, 1500);
 }
 async function startOAuth(target) {
@@ -117,7 +109,7 @@ async function startOAuth(target) {
     sessionStorage.setItem('contextpulse.oauthAttempt', oauthAttempt.id);
     if (oauthPopup) oauthPopup.location = oauthUrl;
     await navigate('settings'); watchOAuth();
-  } catch (error) { oauthPopup?.close(); oauthAttempt = { status: 'failed', message: error.message }; renderOAuthCard(); throw error; }
+  } catch (error) { oauthPopup?.close(); oauthAttempt = { status: 'failed', message: error.message }; renderShell(); throw error; }
 }
 function shortId(value) { return value?.slice(0, 14) || ''; }
 
@@ -143,7 +135,7 @@ function modelPickerHtml() {
   const busy = (state.busy || []).length > 0;
   const options = available.map(model => `<button type="button" role="menuitemradio" aria-checked="${model.id === current}" data-action="model-select" data-model="${esc(model.id)}" class="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50 ${model.id === current ? 'text-indigo-700 bg-indigo-50' : 'text-slate-700'}" ${busy || loading ? 'disabled' : ''}><span class="truncate">${esc(model.name)}</span>${model.id === current ? '<span class="material-symbols-outlined text-[18px]">check</span>' : ''}</button>`).join('');
   const emptyState = loading ? '<p class="px-3 py-3 text-xs text-slate-500" role="status">Loading models…</p>'
-    : !connected ? `<p class="px-3 py-3 text-xs text-slate-500">${provider === 'chatgpt' ? 'Connect a ChatGPT account.' : 'Add your API key in Settings.'}</p>`
+    : !connected ? `<p class="px-3 py-3 text-xs text-slate-500">Connect a ChatGPT account.</p>`
       : modelErrors.has(provider) ? `<p class="px-3 py-3 text-xs text-rose-700" role="status">${esc(modelErrors.get(provider))}</p>`
         : !available.length ? '<p class="px-3 py-3 text-xs text-slate-500">No models are available.</p>' : '';
   return `<details id="model-menu" class="relative"><summary aria-label="Choose a model: ${esc(label)}" class="list-none cursor-pointer flex max-w-[180px] items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"><span class="material-symbols-outlined text-indigo-600 text-[18px]">auto_awesome</span><span class="truncate">${esc(label)}</span><span class="material-symbols-outlined text-slate-400 text-[18px]">expand_more</span></summary><div role="menu" aria-label="Choose a model" class="absolute right-0 bottom-full z-[60] mb-2 w-72 max-w-[calc(100vw-24px)] rounded-xl border border-slate-200 bg-white p-2 shadow-xl"><p class="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Available models</p>${options || emptyState}<div class="mt-2 border-t border-slate-100 pt-2">${button('Refresh', 'models-refresh', loading || busy ? 'disabled' : '')}</div></div></details>`;
@@ -257,8 +249,19 @@ function renderShell() {
   const loginRequired = chatNeedsLogin();
   const pendingLogin = ['pending', 'processing'].includes(oauthAttempt.status);
   const activeAccount = state.auth.accounts.find(account => account.active);
-  if (loginRequired) {
-    const action = state.auth.signedIn && activeAccount ? 'reauth' : 'login';
+  if (loginRequired && !state.capabilities?.oauth) {
+    settingsTab.dataset.page = 'settings';
+    delete settingsTab.dataset.action;
+    delete settingsTab.dataset.client;
+    delete settingsTab.dataset.consent;
+    settingsTab.disabled = false;
+    settingsTab.setAttribute('aria-label', 'ChatGPT sign-in information');
+    settingsTab.title = 'ChatGPT sign-in information';
+    settingsTab.classList.remove('sidebar-login-tab');
+    settingsTab.classList.add('sidebar-settings-tab');
+    settingsTab.innerHTML = '<span class="material-symbols-outlined">info</span><span>ChatGPT sign-in information</span>';
+  } else if (loginRequired) {
+    const action = pendingLogin ? 'oauth-continue' : state.auth.signedIn && activeAccount ? 'reauth' : 'login';
     settingsTab.removeAttribute('data-page');
     settingsTab.dataset.action = action;
     if (action === 'reauth') {
@@ -268,12 +271,12 @@ function renderShell() {
       delete settingsTab.dataset.client;
       delete settingsTab.dataset.consent;
     }
-    settingsTab.disabled = pendingLogin;
-    settingsTab.setAttribute('aria-label', pendingLogin ? 'Checking sign-in' : state.auth.signedIn ? 'Approve plan access' : 'Log in with ChatGPT');
-    settingsTab.title = pendingLogin ? 'Checking sign-in' : state.auth.signedIn ? 'Approve plan access' : 'Log in with ChatGPT';
+    settingsTab.disabled = false;
+    settingsTab.setAttribute('aria-label', pendingLogin ? 'Continue sign-in' : state.auth.signedIn ? 'Approve plan access' : 'Log in with ChatGPT');
+    settingsTab.title = pendingLogin ? 'Continue sign-in' : state.auth.signedIn ? 'Approve plan access' : 'Log in with ChatGPT';
     settingsTab.classList.remove('sidebar-settings-tab');
     settingsTab.classList.add('sidebar-login-tab');
-    settingsTab.innerHTML = `<span class="material-symbols-outlined">${pendingLogin ? 'hourglass_top' : 'login'}</span><span>${pendingLogin ? 'Checking sign-in' : state.auth.signedIn ? 'Approve plan access' : 'Log in with ChatGPT'}</span>`;
+    settingsTab.innerHTML = `<span class="material-symbols-outlined">${pendingLogin ? 'open_in_new' : 'login'}</span><span>${pendingLogin ? 'Continue sign-in' : state.auth.signedIn ? 'Approve plan access' : 'Log in with ChatGPT'}</span>`;
   } else {
     settingsTab.dataset.page = 'settings';
     delete settingsTab.dataset.action;
@@ -597,8 +600,8 @@ async function loadComparison() {
 }
 function renderSettings() {
   const s = state.settings;
-  $('#view').innerHTML = `<div class="p-4 md:p-6 space-y-5"><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-4"><div><h1 class="text-xl font-semibold">Settings</h1><p class="mt-2 text-sm text-slate-600">Manage language and stored data.</p></div><label class="block max-w-sm rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">Interface language<select id="language-select" class="block mt-2 w-full rounded-lg border-slate-200 bg-white text-sm text-slate-800"><option value="en" ${LOCALE === 'en' ? 'selected' : ''}>English</option><option value="ko" ${LOCALE === 'ko' ? 'selected' : ''}>Korean</option></select></label><p class="text-xs text-slate-500">Records retained in server storage</p></section>${oauthCardHtml()}<div class="grid grid-cols-1 xl:grid-cols-2 gap-5"><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-4"><h2 class="font-semibold">Connection settings</h2>
-  <form id="settings-form" class="space-y-3"><label class="block text-sm">Connection type<select id="provider-input" class="block mt-1 w-full rounded border-slate-200 text-sm">${[['chatgpt', 'ChatGPT OAuth'], ['openai', 'OpenAI API key'], ['ollama', 'Local model · Ollama / Gemma'], ['demo', 'Demo · No model call']].filter(([id]) => !state.capabilities || state.capabilities.providers.includes(id)).map(([id, name]) => `<option value="${id}" ${s.provider === id ? 'selected' : ''}>${name}</option>`).join('')}</select></label><label id="ollama-field" class="block text-sm ${s.provider !== 'ollama' || state.mode === 'hosted' ? 'hidden' : ''}">Local model URL<input id="ollama-url" class="block mt-1 w-full rounded border-slate-200 text-sm" value="${esc(s.ollamaUrl)}"></label><label id="api-key-field" class="block text-sm ${s.provider !== 'openai' ? 'hidden' : ''}">OpenAI API key <span class="text-xs text-slate-500">${state.auth.apiKeySet ? 'Saved · Leave blank to keep' : 'Not configured'}</span><input id="api-key" type="password" autocomplete="off" class="block mt-1 w-full rounded border-slate-200 text-sm" placeholder="Enter only to save a new key"></label><p class="text-xs text-slate-500">Choose a model in each chat's composer.</p><label class="flex gap-2 items-center text-sm"><input id="auto-context" type="checkbox" ${s.autoContext ? 'checked' : ''}>Automatically register and select conversation context</label><p class="text-xs text-slate-500">A connected model makes up to two additional calls for context selection and registration. Context is registered from user messages and assistant replies. Assistant suggestions are hypotheses. Context from the current question is applied immediately; context extracted from an answer is used in later answers.</p><button class="bg-indigo-600 text-white rounded-lg px-4 py-2 text-sm">Save settings</button></form><p class="text-xs text-slate-500">Credentials stay in server-only files and are excluded from call records and exports. API keys in the public demo are encrypted at rest.</p></section>
+  $('#view').innerHTML = `<div class="p-4 md:p-6 space-y-5"><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-4"><div><h1 class="text-xl font-semibold">Settings</h1><p class="mt-2 text-sm text-slate-600">Manage language and stored data.</p></div><label class="block max-w-sm rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">Interface language<select id="language-select" class="block mt-2 w-full rounded-lg border-slate-200 bg-white text-sm text-slate-800"><option value="en" ${LOCALE === 'en' ? 'selected' : ''}>English</option><option value="ko" ${LOCALE === 'ko' ? 'selected' : ''}>Korean</option></select></label><p class="text-xs text-slate-500">Records retained in server storage</p></section>${oauthSetupNoticeHtml()}<div class="grid grid-cols-1 xl:grid-cols-2 gap-5"><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+  <form id="settings-form" class="space-y-3"><h2 class="font-semibold">Context manager</h2><label class="flex gap-2 items-center text-sm"><input id="auto-context" type="checkbox" ${s.autoContext ? 'checked' : ''}>Automatically register and select conversation context</label><p class="text-xs text-slate-500">Context is registered automatically from user messages and model replies. New context is saved after the current answer and used in later related answers. Model suggestions are treated as hypotheses.</p><button class="bg-indigo-600 text-white rounded-lg px-4 py-2 text-sm">Save settings</button></form><p class="text-xs text-slate-500">Connect ChatGPT once, then select a model in the chat composer. Credentials are stored on the server and excluded from call records and exports.</p></section>
   <div class="space-y-5"><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-3"><h2 class="font-semibold">Storage and export</h2><p class="text-sm text-slate-600">Storage ${(state.storage_bytes / 1024).toFixed(1)} KB · Projects ${state.projects.length}</p><div class="flex flex-wrap gap-2">${button('Download all records as JSON', 'export-json')}${button('Download SQLite database', 'export-sqlite')}</div><p class="text-xs text-slate-500">Includes original conversations; excludes credentials. Import and deletion are not available yet.</p></section><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-3"><h2 class="font-semibold">Validation policy</h2><p class="text-sm text-slate-600">At most one correction · One revalidation<br>Check source quotes before correction<br>Separate project scopes<br>Preserve inputs without overwriting</p><p class="text-xs text-slate-500">Insufficient evidence or invalid validation output is marked uncertain. Conflicts that remain after revalidation are marked unresolved.</p></section><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-3"><h2 class="font-semibold">Correction flow demo</h2><p class="text-sm text-slate-600">A separate demo project shows a draft that conflicts with conversation context, followed by source review, correction, and revalidation.</p>${button('Create a demo project', 'demo')}<p class="text-xs text-amber-800">The demo makes no model calls. It does not establish semantic validation accuracy in ordinary chats.</p></section></div></div></div>`;
 }
 async function sendMessage() {
@@ -624,7 +627,7 @@ async function syncConnection() {
     state = next;
     if (previous !== state.auth.activeClientId) { models.delete('chatgpt'); modelErrors.delete('chatgpt'); }
     renderShell();
-    if (pageName === 'settings') { renderOAuthCard(); showPlanWelcome(); }
+    if (pageName === 'settings') showPlanWelcome();
     if (pageName === 'chat') {
       syncChatModelState();
       if (!models.has(state.settings.provider)) loadModelsForProvider().catch(error => toast(error.message));
@@ -658,14 +661,8 @@ async function download(path, filename) {
   a.href = url; a.download = filename; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 async function saveSettings() {
-  const provider = $('#provider-input').value;
-  const previous = state.settings;
-  const model = provider === state.settings.provider ? state.settings.model : provider === 'chatgpt' ? state.settings.chatgptModels?.[state.auth.activeClientId] || '' : '';
-  const ollamaUrl = $('#ollama-url')?.value || state.settings.ollamaUrl;
-  const apiKey = $('#api-key')?.value || '';
-  state = await api('/settings', 'POST', { provider, model, ollamaUrl, apiKey, autoContext: $('#auto-context').checked });
-  if (previous.provider !== provider || previous.ollamaUrl !== ollamaUrl || apiKey) { models.delete(provider); modelErrors.delete(provider); }
-  toast('Saved model settings.'); render();
+  state = await api('/settings', 'POST', { provider: state.settings.provider, model: state.settings.model, ollamaUrl: state.settings.ollamaUrl, autoContext: $('#auto-context').checked });
+  toast('Context Settings saved.'); render();
 }
 
 document.addEventListener('submit', async event => {
@@ -711,10 +708,6 @@ document.addEventListener('change', async event => {
     if (event.target.id === 'context-status-filter') { contextStatus = event.target.value; $('#context-list').innerHTML = contextListHtml(); }
     if (event.target.id === 'run-select') { selectedRun = event.target.value; compare = null; renderInspector(); }
     if (['compare-left', 'compare-right'].includes(event.target.id)) await loadComparison();
-    if (event.target.id === 'provider-input') {
-      $('#ollama-field').classList.toggle('hidden', event.target.value !== 'ollama' || state.mode === 'hosted');
-      $('#api-key-field').classList.toggle('hidden', event.target.value !== 'openai');
-    }
   } catch (error) { toast(error.message); }
 });
 document.addEventListener('click', async event => {
@@ -806,7 +799,7 @@ document.addEventListener('click', async event => {
     }
     if (action === 'oauth-cancel') {
       const result = await api('/auth/cancel', 'POST', {}); oauthAttempt = result.attempt;
-      clearTimeout(oauthTimer); sessionStorage.removeItem('contextpulse.oauthAttempt'); oauthUrl = ''; oauthPopup?.close(); oauthPopup = null; renderOAuthCard(); return;
+      clearTimeout(oauthTimer); sessionStorage.removeItem('contextpulse.oauthAttempt'); oauthUrl = ''; oauthPopup?.close(); oauthPopup = null; renderShell(); return;
     }
     if (action === 'acknowledge-plan') {
       state = await api('/auth/acknowledge', 'POST', {}); $('#plan-welcome')?.remove(); return;
@@ -878,7 +871,7 @@ async function init() {
   if (['connected', 'permission_required'].includes(oauthAttempt.status)) sessionStorage.removeItem('contextpulse.oauthAttempt');
   const authMessage = new URLSearchParams(location.search).get('auth') || (location.hash.includes('?auth=') ? decodeURIComponent(location.hash.split('?auth=')[1]) : '');
   if (authMessage) { toast(authMessage); history.replaceState(null, '', routePath(pageName)); }
-  if (pageName === 'settings') { renderOAuthCard(); showPlanWelcome(); }
+  if (pageName === 'settings') showPlanWelcome();
   if (pageName === 'chat') loadModelsForProvider().catch(error => toast(error.message));
   if (['pending', 'processing'].includes(oauthAttempt.status)) watchOAuth();
 }

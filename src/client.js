@@ -43,18 +43,10 @@ function countLabel(count, koLabel, enPlural, enSingular = enPlural) { return LO
 function raw(value) { return `<pre class="bg-slate-900 text-indigo-200 rounded-lg p-3 text-xs overflow-auto max-h-[600px]">${esc(typeof value === 'string' ? value : JSON.stringify(value, null, 2))}</pre>`; }
 function topicValues(value) { return [...new Set(value.split(/[,，]/).map(t => t.trim().replace(/^#/, '')).filter(Boolean))].slice(0, 12); }
 function demoNotice() { return `<div class="px-4 py-2 bg-amber-50 border-b border-amber-200 text-amber-900 text-xs">시연 기록 · 실제 모델 호출 없음 · 고정된 사례로 교정 흐름을 확인합니다.</div>`; }
-function oauthCardHtml() {
-  if (state.mode === 'hosted') return `<section class="bg-white border border-slate-200 rounded-xl p-5 space-y-3"><h2 class="font-semibold">공개 데모</h2><p class="text-sm text-slate-600">이 데모는 로그인 없이 사용할 수 있습니다. 기본 시연은 모델을 호출하지 않으며, 실제 답변을 사용하려면 본인의 API 키를 설정하세요. 대화와 컨텍스트는 방문자별로 분리해 저장합니다.</p></section>`;
-  const pending = ['pending', 'processing'].includes(oauthAttempt.status);
-  const activeAccount = state.auth.accounts.find(a => a.active);
-  const connectedAccounts = state.auth.accounts.filter(a => a.connected);
-  const status = pending ? oauthAttempt.message : state.auth.chatgptConnected ? '계정 연결 완료' : state.auth.signedIn ? '플랜 사용 권한 필요' : '';
-  return `<section id="oauth-card" class="bg-white border border-slate-200 rounded-xl p-5 space-y-4"><div class="flex flex-wrap justify-between items-start gap-3"><div><h2 class="font-semibold">ChatGPT 모델 연결 · 선택 사항</h2><p class="text-sm text-slate-500 mt-2">ChatGPT OAuth는 실제 모델 답변과 자동 컨텍스트 처리를 위한 선택적 연결입니다. 프로젝트·대화·저장된 컨텍스트는 로그인 없이도 유지되고 관리됩니다.</p></div>${status ? pill(status, state.auth.chatgptConnected ? 'green' : pending ? 'amber' : 'slate') : ''}</div><div class="flex flex-wrap gap-2 items-center">${state.auth.signedIn ? button('연결 해제', 'disconnect') : ''}${state.auth.chatgptConnected ? '<a href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener noreferrer" class="text-xs text-indigo-700 underline">ChatGPT 사용량 관리</a>' : ''}</div><p class="text-xs text-slate-500">OAuth는 모델 제공자 인증에만 사용합니다. 기존 ChatGPT 대화 기록은 가져오지 않습니다.</p>
-  ${pending ? `<div role="status" class="rounded-lg bg-indigo-50 border border-indigo-200 p-3 space-y-2"><p class="text-sm text-indigo-900">${esc(oauthAttempt.message)}</p><p class="text-xs text-indigo-700">승인 후 자동으로 연결 상태를 확인합니다. 로그인 창이 열리지 않으면 아래 버튼을 사용하세요.</p><div class="flex flex-wrap gap-2">${button('이 탭에서 로그인 계속', 'oauth-continue')}${oauthAttempt.status === 'pending' ? button('로그인 취소', 'oauth-cancel') : ''}</div></div>` : ['failed', 'expired', 'cancelled', 'permission_required'].includes(oauthAttempt.status) ? `<p role="status" class="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">${esc(oauthAttempt.message)}</p>` : ''}
-  ${connectedAccounts.length ? `<div class="space-y-2">${connectedAccounts.map(a => `<div class="p-3 rounded-lg border ${a.active ? 'border-indigo-200 bg-indigo-50' : 'border-slate-200'} flex flex-wrap justify-between items-center gap-3"><div><p class="text-sm font-medium">${esc(a.label)}</p><p class="mt-1 text-xs text-slate-500">${a.active ? '현재 계정 · ' : ''}${a.planEnabled ? 'ChatGPT 플랜 사용 권한 승인됨' : '플랜 사용 권한 필요'}</p></div>${!a.active ? button('이 계정 사용', 'choose-account', `data-client="${esc(a.client_id)}" ${pending ? 'disabled' : ''}`) : ''}</div>`).join('')}</div>` : ''}
-  ${state.auth.signedIn && activeAccount && !activeAccount.planEnabled ? '<p class="text-xs text-amber-900">플랜 사용 권한이 필요하면 왼쪽 아래에서 계속 진행할 수 있습니다.</p>' : ''}</section>`;
+function oauthSetupNoticeHtml() {
+  if (state.capabilities?.oauth) return '';
+  return `<section class="bg-amber-50 border border-amber-200 rounded-xl p-5 space-y-2"><h2 class="font-semibold">ChatGPT 로그인 연결이 준비되지 않았습니다</h2><p class="text-sm text-amber-900">이 공개 주소에서는 ChatGPT OAuth를 사용할 수 없습니다. OpenAI 웹 로그인은 등록된 공개 콜백 주소가 필요합니다. 로컬 테스트 주소에서는 동일한 앱의 전체 채팅과 컨텍스트 기능을 사용할 수 있습니다.</p></section>`;
 }
-function renderOAuthCard() { const card = $('#oauth-card'); if (card) card.outerHTML = oauthCardHtml(); }
 async function loadModelsForProvider(provider = state.settings.provider, force = false) {
   if (provider === 'chatgpt' && !state.auth.chatgptConnected) return;
   const accountId = provider === 'chatgpt' ? state.auth.activeClientId : null;
@@ -101,10 +93,10 @@ function watchOAuth() {
     try {
       const result = await api('/auth/status'); oauthAttempt = result.attempt; state.auth = result.auth;
       if (['connected', 'permission_required'].includes(oauthAttempt.status)) return await oauthCompleted();
-      renderOAuthCard();
+      renderShell();
       if (['pending', 'processing'].includes(oauthAttempt.status)) watchOAuth();
       else { oauthUrl = ''; toast(oauthAttempt.message || '로그인 요청이 종료됐습니다. 다시 연결하세요.'); }
-    } catch (error) { oauthAttempt = { status: 'failed', message: error.message }; renderOAuthCard(); }
+    } catch (error) { oauthAttempt = { status: 'failed', message: error.message }; renderShell(); }
   }, 1500);
 }
 async function startOAuth(target) {
@@ -117,7 +109,7 @@ async function startOAuth(target) {
     sessionStorage.setItem('contextpulse.oauthAttempt', oauthAttempt.id);
     if (oauthPopup) oauthPopup.location = oauthUrl;
     await navigate('settings'); watchOAuth();
-  } catch (error) { oauthPopup?.close(); oauthAttempt = { status: 'failed', message: error.message }; renderOAuthCard(); throw error; }
+  } catch (error) { oauthPopup?.close(); oauthAttempt = { status: 'failed', message: error.message }; renderShell(); throw error; }
 }
 function shortId(value) { return value?.slice(0, 14) || ''; }
 
@@ -143,7 +135,7 @@ function modelPickerHtml() {
   const busy = (state.busy || []).length > 0;
   const options = available.map(model => `<button type="button" role="menuitemradio" aria-checked="${model.id === current}" data-action="model-select" data-model="${esc(model.id)}" class="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50 ${model.id === current ? 'text-indigo-700 bg-indigo-50' : 'text-slate-700'}" ${busy || loading ? 'disabled' : ''}><span class="truncate">${esc(model.name)}</span>${model.id === current ? '<span class="material-symbols-outlined text-[18px]">check</span>' : ''}</button>`).join('');
   const emptyState = loading ? '<p class="px-3 py-3 text-xs text-slate-500" role="status">모델 목록을 불러오는 중…</p>'
-    : !connected ? `<p class="px-3 py-3 text-xs text-slate-500">${provider === 'chatgpt' ? 'ChatGPT 계정을 연결하세요.' : '설정에서 API 키를 등록하세요.'}</p>`
+    : !connected ? `<p class="px-3 py-3 text-xs text-slate-500">ChatGPT 계정을 연결하세요.</p>`
       : modelErrors.has(provider) ? `<p class="px-3 py-3 text-xs text-rose-700" role="status">${esc(modelErrors.get(provider))}</p>`
         : !available.length ? '<p class="px-3 py-3 text-xs text-slate-500">사용 가능한 모델이 없습니다.</p>' : '';
   return `<details id="model-menu" class="relative"><summary aria-label="모델 선택: ${esc(label)}" class="list-none cursor-pointer flex max-w-[180px] items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"><span class="material-symbols-outlined text-indigo-600 text-[18px]">auto_awesome</span><span class="truncate">${esc(label)}</span><span class="material-symbols-outlined text-slate-400 text-[18px]">expand_more</span></summary><div role="menu" aria-label="모델 선택" class="absolute right-0 bottom-full z-[60] mb-2 w-72 max-w-[calc(100vw-24px)] rounded-xl border border-slate-200 bg-white p-2 shadow-xl"><p class="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400">사용 가능한 모델</p>${options || emptyState}<div class="mt-2 border-t border-slate-100 pt-2">${button('새로고침', 'models-refresh', loading || busy ? 'disabled' : '')}</div></div></details>`;
@@ -257,8 +249,19 @@ function renderShell() {
   const loginRequired = chatNeedsLogin();
   const pendingLogin = ['pending', 'processing'].includes(oauthAttempt.status);
   const activeAccount = state.auth.accounts.find(account => account.active);
-  if (loginRequired) {
-    const action = state.auth.signedIn && activeAccount ? 'reauth' : 'login';
+  if (loginRequired && !state.capabilities?.oauth) {
+    settingsTab.dataset.page = 'settings';
+    delete settingsTab.dataset.action;
+    delete settingsTab.dataset.client;
+    delete settingsTab.dataset.consent;
+    settingsTab.disabled = false;
+    settingsTab.setAttribute('aria-label', 'ChatGPT 연결 안내');
+    settingsTab.title = 'ChatGPT 연결 안내';
+    settingsTab.classList.remove('sidebar-login-tab');
+    settingsTab.classList.add('sidebar-settings-tab');
+    settingsTab.innerHTML = '<span class="material-symbols-outlined">info</span><span>ChatGPT 연결 안내</span>';
+  } else if (loginRequired) {
+    const action = pendingLogin ? 'oauth-continue' : state.auth.signedIn && activeAccount ? 'reauth' : 'login';
     settingsTab.removeAttribute('data-page');
     settingsTab.dataset.action = action;
     if (action === 'reauth') {
@@ -268,12 +271,12 @@ function renderShell() {
       delete settingsTab.dataset.client;
       delete settingsTab.dataset.consent;
     }
-    settingsTab.disabled = pendingLogin;
-    settingsTab.setAttribute('aria-label', pendingLogin ? '로그인 확인 중' : state.auth.signedIn ? '플랜 권한 승인' : 'ChatGPT 로그인');
-    settingsTab.title = pendingLogin ? '로그인 확인 중' : state.auth.signedIn ? '플랜 권한 승인' : 'ChatGPT 로그인';
+    settingsTab.disabled = false;
+    settingsTab.setAttribute('aria-label', pendingLogin ? '로그인 계속' : state.auth.signedIn ? '플랜 권한 승인' : 'ChatGPT 로그인');
+    settingsTab.title = pendingLogin ? '로그인 계속' : state.auth.signedIn ? '플랜 권한 승인' : 'ChatGPT 로그인';
     settingsTab.classList.remove('sidebar-settings-tab');
     settingsTab.classList.add('sidebar-login-tab');
-    settingsTab.innerHTML = `<span class="material-symbols-outlined">${pendingLogin ? 'hourglass_top' : 'login'}</span><span>${pendingLogin ? '로그인 확인 중' : state.auth.signedIn ? '플랜 권한 승인' : 'ChatGPT 로그인'}</span>`;
+    settingsTab.innerHTML = `<span class="material-symbols-outlined">${pendingLogin ? 'open_in_new' : 'login'}</span><span>${pendingLogin ? '로그인 계속' : state.auth.signedIn ? '플랜 권한 승인' : 'ChatGPT 로그인'}</span>`;
   } else {
     settingsTab.dataset.page = 'settings';
     delete settingsTab.dataset.action;
@@ -597,8 +600,8 @@ async function loadComparison() {
 }
 function renderSettings() {
   const s = state.settings;
-  $('#view').innerHTML = `<div class="p-4 md:p-6 space-y-5"><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-4"><div><h1 class="text-xl font-semibold">설정</h1><p class="mt-2 text-sm text-slate-600">언어와 저장 정보를 관리합니다.</p></div><label class="block max-w-sm rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">인터페이스 언어<select id="language-select" class="block mt-2 w-full rounded-lg border-slate-200 bg-white text-sm text-slate-800"><option value="en" ${LOCALE === 'en' ? 'selected' : ''}>English</option><option value="ko" ${LOCALE === 'ko' ? 'selected' : ''}>한국어</option></select></label><p class="text-xs text-slate-500">기록은 서버 저장소에 보존</p></section>${oauthCardHtml()}<div class="grid grid-cols-1 xl:grid-cols-2 gap-5"><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-4"><h2 class="font-semibold">연결 설정</h2>
-  <form id="settings-form" class="space-y-3"><label class="block text-sm">연결 방식<select id="provider-input" class="block mt-1 w-full rounded border-slate-200 text-sm">${[['chatgpt', 'ChatGPT OAuth'], ['openai', 'OpenAI API 키'], ['ollama', '로컬 모델 · Ollama / Gemma'], ['demo', '시연 · 모델 호출 없음']].filter(([id]) => !state.capabilities || state.capabilities.providers.includes(id)).map(([id, name]) => `<option value="${id}" ${s.provider === id ? 'selected' : ''}>${name}</option>`).join('')}</select></label><label id="ollama-field" class="block text-sm ${s.provider !== 'ollama' || state.mode === 'hosted' ? 'hidden' : ''}">로컬 모델 주소<input id="ollama-url" class="block mt-1 w-full rounded border-slate-200 text-sm" value="${esc(s.ollamaUrl)}"></label><label id="api-key-field" class="block text-sm ${s.provider !== 'openai' ? 'hidden' : ''}">OpenAI API 키 <span class="text-xs text-slate-500">${state.auth.apiKeySet ? '등록됨 · 빈칸은 유지' : '미등록'}</span><input id="api-key" type="password" autocomplete="off" class="block mt-1 w-full rounded border-slate-200 text-sm" placeholder="새 키를 등록할 때만 입력"></label><p class="text-xs text-slate-500">모델은 각 대화의 입력창에서 선택합니다.</p><label class="flex gap-2 items-center text-sm"><input id="auto-context" type="checkbox" ${s.autoContext ? 'checked' : ''}>대화 맥락 자동 등록·질문별 의미 선택</label><p class="text-xs text-slate-500">실제 모델 연결 시 선택·자동 등록에 최대 2회 추가 호출합니다. 사용자 원문과 모델 답변에서 맥락을 자동 등록합니다. 모델 제안은 검토 중인 가설로 분류합니다. 현재 질문에서 파악한 내용은 바로 반영하고, 답변에서 찾은 맥락은 다음 답변부터 사용합니다.</p><button class="bg-indigo-600 text-white rounded-lg px-4 py-2 text-sm">설정 저장</button></form><p class="text-xs text-slate-500">인증 정보는 서버 전용 파일에 저장하며 호출 기록·내보내기에 포함하지 않습니다. 공개 데모의 API 키는 암호화해 저장합니다.</p></section>
+  $('#view').innerHTML = `<div class="p-4 md:p-6 space-y-5"><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-4"><div><h1 class="text-xl font-semibold">설정</h1><p class="mt-2 text-sm text-slate-600">언어와 저장 정보를 관리합니다.</p></div><label class="block max-w-sm rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">인터페이스 언어<select id="language-select" class="block mt-2 w-full rounded-lg border-slate-200 bg-white text-sm text-slate-800"><option value="en" ${LOCALE === 'en' ? 'selected' : ''}>English</option><option value="ko" ${LOCALE === 'ko' ? 'selected' : ''}>한국어</option></select></label><p class="text-xs text-slate-500">기록은 서버 저장소에 보존</p></section>${oauthSetupNoticeHtml()}<div class="grid grid-cols-1 xl:grid-cols-2 gap-5"><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+  <form id="settings-form" class="space-y-3"><h2 class="font-semibold">컨텍스트 관리</h2><label class="flex gap-2 items-center text-sm"><input id="auto-context" type="checkbox" ${s.autoContext ? 'checked' : ''}>대화 맥락 자동 등록·질문별 의미 선택</label><p class="text-xs text-slate-500">사용자 발화와 모델 답변에서 맥락을 자동 등록합니다. 새 맥락은 현재 답변이 끝난 뒤 저장하고, 다음 관련 답변부터 활용합니다. 모델 제안은 가설로 분류합니다.</p><button class="bg-indigo-600 text-white rounded-lg px-4 py-2 text-sm">설정 저장</button></form><p class="text-xs text-slate-500">ChatGPT에 한 번 연결한 뒤 모델은 채팅 입력창에서 선택합니다. 인증 정보는 서버에 저장하며 호출 기록·내보내기에서 제외합니다.</p></section>
   <div class="space-y-5"><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-3"><h2 class="font-semibold">저장소와 내보내기</h2><p class="text-sm text-slate-600">저장 용량 ${(state.storage_bytes / 1024).toFixed(1)} KB · 프로젝트 ${state.projects.length}개</p><div class="flex flex-wrap gap-2">${button('전체 기록 JSON 다운로드', 'export-json')}${button('실제 SQLite 다운로드', 'export-sqlite')}</div><p class="text-xs text-slate-500">대화 원문이 포함됩니다. 인증 정보는 제외합니다. 기록 삭제·가져오기는 아직 제공하지 않습니다.</p></section><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-3"><h2 class="font-semibold">검증 정책</h2><p class="text-sm text-slate-600">교정 최대 1회 · 재검증 1회<br>원문 인용 확인 후 교정<br>프로젝트 범위 분리<br>호출 당시 입력은 수정·덮어쓰기 금지</p><p class="text-xs text-slate-500">근거가 부족하거나 검증 응답이 올바르지 않으면 판단 보류로 표시합니다. 재검증 후에도 충돌하면 미해결로 남깁니다.</p></section><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-3"><h2 class="font-semibold">교정 흐름 시연</h2><p class="text-sm text-slate-600">별도 시연 프로젝트에서 대화의 맥락과 어긋난 초안 → 원문 확인 → 답변 수정 → 재검증을 확인합니다.</p>${button('새 시연 프로젝트 만들기', 'demo')}<p class="text-xs text-amber-800">시연은 실제 모델을 호출하지 않습니다. 일반 채팅의 의미 검증 성능을 입증하는 테스트가 아닙니다.</p></section></div></div></div>`;
 }
 async function sendMessage() {
@@ -624,7 +627,7 @@ async function syncConnection() {
     state = next;
     if (previous !== state.auth.activeClientId) { models.delete('chatgpt'); modelErrors.delete('chatgpt'); }
     renderShell();
-    if (pageName === 'settings') { renderOAuthCard(); showPlanWelcome(); }
+    if (pageName === 'settings') showPlanWelcome();
     if (pageName === 'chat') {
       syncChatModelState();
       if (!models.has(state.settings.provider)) loadModelsForProvider().catch(error => toast(error.message));
@@ -658,14 +661,8 @@ async function download(path, filename) {
   a.href = url; a.download = filename; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 async function saveSettings() {
-  const provider = $('#provider-input').value;
-  const previous = state.settings;
-  const model = provider === state.settings.provider ? state.settings.model : provider === 'chatgpt' ? state.settings.chatgptModels?.[state.auth.activeClientId] || '' : '';
-  const ollamaUrl = $('#ollama-url')?.value || state.settings.ollamaUrl;
-  const apiKey = $('#api-key')?.value || '';
-  state = await api('/settings', 'POST', { provider, model, ollamaUrl, apiKey, autoContext: $('#auto-context').checked });
-  if (previous.provider !== provider || previous.ollamaUrl !== ollamaUrl || apiKey) { models.delete(provider); modelErrors.delete(provider); }
-  toast('모델 설정을 저장했습니다.'); render();
+  state = await api('/settings', 'POST', { provider: state.settings.provider, model: state.settings.model, ollamaUrl: state.settings.ollamaUrl, autoContext: $('#auto-context').checked });
+  toast('컨텍스트 설정을 저장했습니다.'); render();
 }
 
 document.addEventListener('submit', async event => {
@@ -711,10 +708,6 @@ document.addEventListener('change', async event => {
     if (event.target.id === 'context-status-filter') { contextStatus = event.target.value; $('#context-list').innerHTML = contextListHtml(); }
     if (event.target.id === 'run-select') { selectedRun = event.target.value; compare = null; renderInspector(); }
     if (['compare-left', 'compare-right'].includes(event.target.id)) await loadComparison();
-    if (event.target.id === 'provider-input') {
-      $('#ollama-field').classList.toggle('hidden', event.target.value !== 'ollama' || state.mode === 'hosted');
-      $('#api-key-field').classList.toggle('hidden', event.target.value !== 'openai');
-    }
   } catch (error) { toast(error.message); }
 });
 document.addEventListener('click', async event => {
@@ -806,7 +799,7 @@ document.addEventListener('click', async event => {
     }
     if (action === 'oauth-cancel') {
       const result = await api('/auth/cancel', 'POST', {}); oauthAttempt = result.attempt;
-      clearTimeout(oauthTimer); sessionStorage.removeItem('contextpulse.oauthAttempt'); oauthUrl = ''; oauthPopup?.close(); oauthPopup = null; renderOAuthCard(); return;
+      clearTimeout(oauthTimer); sessionStorage.removeItem('contextpulse.oauthAttempt'); oauthUrl = ''; oauthPopup?.close(); oauthPopup = null; renderShell(); return;
     }
     if (action === 'acknowledge-plan') {
       state = await api('/auth/acknowledge', 'POST', {}); $('#plan-welcome')?.remove(); return;
@@ -878,7 +871,7 @@ async function init() {
   if (['connected', 'permission_required'].includes(oauthAttempt.status)) sessionStorage.removeItem('contextpulse.oauthAttempt');
   const authMessage = new URLSearchParams(location.search).get('auth') || (location.hash.includes('?auth=') ? decodeURIComponent(location.hash.split('?auth=')[1]) : '');
   if (authMessage) { toast(authMessage); history.replaceState(null, '', routePath(pageName)); }
-  if (pageName === 'settings') { renderOAuthCard(); showPlanWelcome(); }
+  if (pageName === 'settings') showPlanWelcome();
   if (pageName === 'chat') loadModelsForProvider().catch(error => toast(error.message));
   if (['pending', 'processing'].includes(oauthAttempt.status)) watchOAuth();
 }

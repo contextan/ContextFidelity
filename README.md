@@ -18,7 +18,7 @@ See the [current prototype scope](docs/project-summary.md) and [Colosseum submis
 
 ## What the prototype does
 
-- Connect a ChatGPT account using the official OAuth flow, an OpenAI API key, or a local Ollama model.
+- Sign in once with ChatGPT from the lower-left sidebar, then choose a model in the chat composer.
 - Keep the selected model when navigating, refreshing, or reconnecting the same account.
 - Store references, background, and hypotheses with topic and project scopes.
 - Identify topics automatically from each question; no topic input is required. Select relevant context by question meaning while retaining manual choices.
@@ -30,13 +30,11 @@ See the [current prototype scope](docs/project-summary.md) and [Colosseum submis
 
 ## Connecting a model
 
-OAuth is an optional way for the local app to authenticate ChatGPT model calls; it is not used to create or store context. Projects, conversations, and saved context remain in the app's local database while disconnected. In Settings, choose **Continue with ChatGPT**, complete sign-in and consent, then select a model from your account's catalog. Validation, correction, selection, and extraction can add calls. Existing ChatGPT conversations are not imported. The hosted demo does not use ChatGPT OAuth: it starts in no-call demo mode, and live inference requires the visitor's own API key.
-
-For Ollama, choose the local provider and a loopback URL such as `http://127.0.0.1:11434`. This prototype restricts that endpoint to local addresses.
+Sign in once with ChatGPT using the lower-left sidebar button. After sign-in, select an available model directly in the chat composer; the choice applies across conversations. Validation, correction, selection, and extraction can add model calls. Existing ChatGPT conversations are not imported. The app does not expose API-key or local-model setup as alternate chat providers. The fixed correction walkthrough is separate and clearly marked as a no-model-call example.
 
 ## Data and evidence
 
-Original messages, versioned context, automatic-registration candidates, and model-call snapshots are stored in `data/contextpulse.sqlite`. Credentials are held separately in a server-only local file with restrictive permissions, and are excluded from exports. OS keychain integration is not implemented. Local mode stays bound to loopback. Hosted mode uses isolated visitor databases and encrypted visitor API keys; see the deployment guide.
+Original messages, versioned context, automatic-registration candidates, and model-call snapshots are stored in `data/contextpulse.sqlite`. Credentials are held separately in a server-only local file with restrictive permissions, and are excluded from exports. OS keychain integration is not implemented. Local mode stays bound to loopback. Hosted mode uses isolated visitor databases and encrypts each visitor's OAuth credentials; see the deployment guide.
 
 The user-facing prototype does not expose a separate decision-management screen or a manual decision-registration checkbox. Conversation criteria are kept as internal evidence for validation and are shown as conversation context inside each answer receipt. See [the current project summary](docs/project-summary.md) for the product scope and demo flow.
 
@@ -46,7 +44,7 @@ English and Korean application copy and prompts are separate. Original user mess
 
 ## Hosted demo and Cloudflare
 
-Run `docker compose -f compose.yaml up -d --build` and open `http://127.0.0.1:8903`. This tests hosted mode locally with separate data. Public deployment uses a persistent origin behind Cloudflare Tunnel, with its own configuration. No public tunnel is started by the test configuration. See [Cloudflare demo guide](docs/cloudflare-demo.md).
+Run `docker compose -f compose.yaml up -d --build` and open `http://127.0.0.1:8903`. This runs the same chat, ChatGPT OAuth, composer model selection, and context features in hosted mode, with visitor-isolated data. Public deployment uses a persistent origin behind Cloudflare Tunnel, with its own configuration. OpenAI's open-source OAuth flow only accepts loopback callbacks; a public HTTPS website needs an OpenAI-registered website login client before ChatGPT sign-in can be enabled. Do not publish the public hostname as a live-model demo until that callback is registered. No public tunnel is started by the test configuration. See [Cloudflare demo guide](docs/cloudflare-demo.md).
 
 ## Verification
 
