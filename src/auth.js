@@ -36,7 +36,8 @@ export class Auth {
   }
   publicStatus() {
     const account = this.account();
-    return { accounts: this.value.accounts.map(a => ({ client_id: a.client_id, email: a.email || 'ChatGPT 계정', label: a.label, active: this.value.active === a.client_id, connected: !!a.access_token, planEnabled: this.planEnabled(a), welcomePending: this.planEnabled(a) && !a.welcome_confirmed })), chatgptConnected: !!account?.access_token && this.planEnabled(account), signedIn: !!account?.access_token, activeClientId: account?.client_id || null, apiKeySet: !!this.value.apiKey };
+    const hasCredentials = value => !!(value?.access_token || value?.refresh_token);
+    return { accounts: this.value.accounts.map(a => ({ client_id: a.client_id, email: a.email || 'ChatGPT 계정', label: a.label, active: this.value.active === a.client_id, connected: hasCredentials(a), canForget: !hasCredentials(a), planEnabled: this.planEnabled(a), welcomePending: this.planEnabled(a) && !a.welcome_confirmed })), chatgptConnected: hasCredentials(account) && this.planEnabled(account), signedIn: hasCredentials(account), activeClientId: account?.client_id || null, apiKeySet: !!this.value.apiKey };
   }
   planEnabled(account = this.account()) { return !!account?.scope?.split(' ').includes('chatgpt.tokens.use.direct'); }
   status(browserSession) {
@@ -56,8 +57,16 @@ export class Auth {
   select(clientId) {
     if (!this.value.accounts.some(a => a.client_id === clientId)) throw new Error('저장된 계정을 찾을 수 없습니다.');
     const account = this.value.accounts.find(a => a.client_id === clientId);
-    if (!account.access_token) throw new Error('이 계정은 다시 연결해야 합니다.');
+    if (!account.access_token && !account.refresh_token) throw new Error('이 계정은 다시 연결해야 합니다.');
     this.value.active = clientId; this.save();
+  }
+  forgetDisconnected(clientId) {
+    const account = this.value.accounts.find(a => a.client_id === clientId);
+    if (!account) throw new Error('저장된 연결 정보를 찾을 수 없습니다.');
+    if (account.access_token || account.refresh_token) throw new Error('사용 가능한 토큰이 남아 있는 연결은 제거할 수 없습니다.');
+    this.value.accounts = this.value.accounts.filter(a => a.client_id !== clientId);
+    if (this.value.active === clientId) this.value.active = null;
+    this.save();
   }
   async disconnect() {
     const account = this.account();
@@ -160,7 +169,7 @@ export class Auth {
     this.value.active = clientId;
     this.save();
     attempt.status = this.planEnabled(account) ? 'connected' : 'permission_required';
-    attempt.message = this.planEnabled(account) ? 'ChatGPT 연결이 완료됐습니다. 사용할 모델을 선택하세요.' : '로그인은 완료됐지만 ChatGPT 플랜 사용 권한이 없습니다. 권한을 승인하거나 다른 연결 방식을 선택하세요.';
+    attempt.message = this.planEnabled(account) ? 'ChatGPT 연결이 완료됐습니다. 채팅 입력창에서 모델을 선택하세요.' : '로그인은 완료됐지만 ChatGPT 플랜 사용 권한이 없습니다. 권한을 승인하거나 다른 연결 방식을 선택하세요.';
     return this.status(attempt.browserSession);
     } catch (error) { attempt.status = query.has('error') ? 'cancelled' : 'failed'; attempt.message = error.message; throw error; }
   }
@@ -168,8 +177,9 @@ export class Auth {
     const account = this.value.accounts.find(a => a.client_id === clientId);
     if (!account) throw new Error('설정에서 Continue with ChatGPT로 연결하세요.');
     if (!this.planEnabled(account)) throw new Error('ChatGPT 플랜 사용 권한을 승인하세요.');
-    if (!account.access_token || this.signingOut.has(account.client_id)) throw new Error('이 계정을 다시 연결하세요.');
-    if (!Number.isFinite(account.expires) || account.expires < Date.now() + 60_000) {
+    if (this.signingOut.has(account.client_id)) throw new Error('이 계정을 다시 연결하세요.');
+    if (!account.access_token && !account.refresh_token) throw new Error('이 계정을 다시 연결하세요.');
+    if (!account.access_token || !Number.isFinite(account.expires) || account.expires < Date.now() + 60_000) {
       // A single rotating refresh token must not be used by concurrent requests.
       if (!this.refreshes.has(account.client_id)) this.refreshes.set(account.client_id, (async () => {
         if (!account.refresh_token) throw new Error('인증이 만료됐습니다. 다시 로그인하세요.');

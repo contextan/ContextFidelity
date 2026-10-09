@@ -94,9 +94,10 @@ export function createApp({ port = 8899, directory = join(root, 'data'), fetcher
       };
       const allowedProviders = hosted ? ['openai', 'demo'] : ['chatgpt', 'openai', 'ollama', 'demo'];
       const checkProvider = (name) => { if (!allowedProviders.includes(name)) throw Object.assign(new Error('This connection is available only in the local app. The web demo supports demo mode or your own API key.'), { status: 400 }); };
-      const connectedSettings = (locale = 'en') => {
+      const connectedSettings = (locale = 'en', session = null, requireModel = true) => {
         const settings = { ...store.settings(), locale }; checkProvider(settings.provider);
-        if (!settings.model) throw new Error('설정에서 연결할 모델을 선택하세요.');
+        if (session?.model && session.model_provider === settings.provider) settings.model = session.model;
+        if (requireModel && !settings.model) throw new Error('채팅 입력창에서 모델을 선택하세요.');
         if (settings.provider === 'chatgpt' && !auth.publicStatus().signedIn) throw new Error('설정에서 Continue with ChatGPT로 연결하세요.');
         if (settings.provider === 'chatgpt' && !auth.planEnabled()) throw new Error('ChatGPT 플랜 사용 권한을 승인하세요.');
         if (settings.provider === 'chatgpt') settings.accountClientId = auth.account().client_id;
@@ -110,7 +111,7 @@ export function createApp({ port = 8899, directory = join(root, 'data'), fetcher
       if (path === '/auth/callback' && req.method === 'GET') {
         let message, destination = 'settings'; const callbackLocale = auth.pending.get(url.searchParams.get('state'))?.locale || 'en';
         const previousAccount = auth.account()?.client_id;
-        try { const result = await auth.callback(url.searchParams, browserSession); message = result.message; const settings = store.settings(); const accountId = auth.account()?.client_id; const model = settings.chatgptModels?.[accountId] || (settings.provider === 'chatgpt' && accountId === previousAccount ? settings.model : ''); store.saveSettings({ ...settings, provider: 'chatgpt', model }); if (result.status === 'connected' && model) destination = ''; }
+        try { const result = await auth.callback(url.searchParams, browserSession); message = result.message; const settings = store.settings(); const accountId = auth.account()?.client_id; const model = settings.chatgptModels?.[accountId] || (settings.provider === 'chatgpt' && accountId === previousAccount ? settings.model : ''); store.saveSettings({ ...settings, provider: 'chatgpt', model }); if (result.status === 'connected') destination = ''; }
         catch (error) { message = error.message; }
         res.writeHead(303, { Location: `${callbackLocale === 'ko' ? '/ko' : ''}/${destination}?auth=${encodeURIComponent(systemText(message, callbackLocale))}` }); return res.end();
       }
@@ -133,7 +134,17 @@ export function createApp({ port = 8899, directory = join(root, 'data'), fetcher
       if (sessionRoute && req.method === 'GET') {
         const session = store.session(sessionRoute[1]);
         if (!session) return json({ error: '대화를 찾을 수 없습니다.' }, 404);
-        return json({ session, messages: store.messages(session.id).map(m => m.role === 'system' ? { ...m, content: systemMessage(m.content, locale) } : m), runs: store.runs(session.id).map(run => ({ ...run, context_usage: contextUsage(store.run(run.id)), ui_warning: systemText(run.validation?.context_warning, locale), ui_error: systemText(run.error, locale), progress: run.status === 'running' ? (() => { const last = store.run(run.id).snapshots.at(-1); return last ? { phase: last.phase, completed: last.call_status === 'completed' } : null; })() : null })) });
+        return json({ session, messages: store.messages(session.id).map(m => m.role === 'system' ? { ...m, content: systemMessage(m.content, locale) } : m), runs: store.runs(session.id).map(run => ({ ...run, context_usage: contextUsage(store.run(run.id), locale), ui_warning: systemText(run.validation?.context_warning, locale), ui_error: systemText(run.error, locale), progress: run.status === 'running' ? (() => { const last = store.run(run.id).snapshots.at(-1); return last ? { phase: last.phase, completed: last.call_status === 'completed' } : null; })() : null })) });
+      }
+      const sessionModelRoute = path.match(/^\/api\/sessions\/([^/]+)\/model$/);
+      if (sessionModelRoute && req.method === 'POST') {
+        const session = store.session(sessionModelRoute[1]);
+        if (!session) return json({ error: '대화를 찾을 수 없습니다.' }, 404);
+        requireIdle(session.project_id);
+        const data = await body(req), model = requiredText(data.model, 200);
+        const settings = connectedSettings(locale, session, false);
+        store.setSessionModel(session.id, settings.provider, model);
+        return json({ session: store.session(session.id) });
       }
       const contextCollection = path.match(/^\/api\/projects\/([^/]+)\/contexts$/);
       const contextRoute = path.match(/^\/api\/contexts\/([^/]+)$/);
@@ -185,7 +196,7 @@ export function createApp({ port = 8899, directory = join(root, 'data'), fetcher
         const session = store.session(analyzeRoute[1]);
         if (!session) throw new Error('대화를 찾을 수 없습니다.');
         requireIdle(session.project_id);
-        const settings = connectedSettings(locale);
+        const settings = connectedSettings(locale, session);
         if (settings.provider === 'demo') throw new Error('시연 모드에는 자동 추출이 없습니다. 설정에서 실제 모델을 연결하세요.');
         if (!store.messages(session.id).some(m => m.role === 'user')) throw new Error('먼저 대화에 사용자 메시지를 남겨주세요.');
         busy.add(session.project_id);
@@ -208,7 +219,7 @@ export function createApp({ port = 8899, directory = join(root, 'data'), fetcher
         const data = await body(req), content = requiredText(data.content), topics = normalizeTopics(data.topics || []);
         requireIdle(session.project_id);
         if (data.decision) return json(store.register(session.id, content, topics, { scope: data.decision.scope, supersedes: data.decision.supersedes || null, locale }), 201);
-        const settings = connectedSettings(locale);
+        const settings = connectedSettings(locale, session);
         const message = store.addMessage(session.id, 'user', content, topics);
         busy.add(session.project_id);
         const task = executeRun(store, provider, session.id, message, { ...settings });
@@ -217,7 +228,7 @@ export function createApp({ port = 8899, directory = join(root, 'data'), fetcher
         return json({ message, run_id: run.id }, 202);
       }
       const runRoute = path.match(/^\/api\/runs\/([^/]+)$/);
-      if (runRoute && req.method === 'GET') { const run = store.run(runRoute[1]); return run ? json({ ...run, context_usage: contextUsage(run), ui_warning: systemText(run.validation?.context_warning, locale), ui_error: systemText(run.error, locale) }) : json({ error: '답변 기록을 찾을 수 없습니다.' }, 404); }
+      if (runRoute && req.method === 'GET') { const run = store.run(runRoute[1]); return run ? json({ ...run, context_usage: contextUsage(run, locale), ui_warning: systemText(run.validation?.context_warning, locale), ui_error: systemText(run.error, locale) }) : json({ error: '답변 기록을 찾을 수 없습니다.' }, 404); }
       if (path === '/api/compare' && req.method === 'GET') {
         const all = [url.searchParams.get('leftRun'), url.searchParams.get('rightRun')].map(r => store.run(r));
         const left = all[0]?.snapshots.find(s => s.id === url.searchParams.get('left'));
@@ -262,7 +273,18 @@ export function createApp({ port = 8899, directory = join(root, 'data'), fetcher
       }
       if (path === '/api/auth/disconnect' && req.method === 'POST') {
         if (busy.size) throw new Error('답변 처리가 끝난 뒤 연결을 해제하세요.');
-        const result = await auth.disconnect(); return json({ ...publicState(), disconnect: { ...result, message: systemText(result.message, locale) } });
+        const activeClientId = auth.account()?.client_id, result = await auth.disconnect();
+        if (activeClientId && store.settings().provider === 'chatgpt') store.saveSettings({ ...store.settings(), model: '' });
+        return json({ ...publicState(), disconnect: { ...result, message: systemText(result.message, locale) } });
+      }
+      if (path === '/api/auth/forget' && req.method === 'POST') {
+        if (busy.size) throw new Error('답변 처리가 끝난 뒤 연결 정보를 정리하세요.');
+        const data = await body(req), clientId = requiredText(data.client_id, 200), settings = store.settings();
+        const wasActive = auth.account()?.client_id === clientId;
+        auth.forgetDisconnected(clientId);
+        const chatgptModels = { ...settings.chatgptModels }; delete chatgptModels[clientId];
+        store.saveSettings({ ...settings, chatgptModels, ...(settings.provider === 'chatgpt' && (wasActive || settings.model === settings.chatgptModels?.[clientId]) ? { model: '' } : {}) });
+        return json(publicState());
       }
       if (path === '/api/export' && req.method === 'GET') { res.setHeader('Content-Disposition', 'attachment; filename="contextpulse-backup.json"'); return json(store.export()); }
       if (path === '/api/export/sqlite' && req.method === 'GET') {

@@ -9,6 +9,10 @@ const enClient = systemText(client);
 const enShell = systemText(shell).replace('lang="ko"', 'lang="en"');
 const missing = (enClient + enShell).match(/[^\n]{0,40}[가-힣][^\n]{0,70}/g);
 if (missing) throw new Error(`Missing English interface copy:\n${[...new Set(missing)].join('\n')}`);
+for (const [locale, source] of [['en', enClient], ['ko', client]]) {
+  try { new Function(source); }
+  catch (error) { throw new Error(`Invalid ${locale} client bundle: ${error.message}`); }
+}
 writeFileSync(new URL('public/app.js', root), enClient);
 writeFileSync(new URL('public/app.ko.js', root), client);
 writeFileSync(new URL('public/index.html', root), enShell);

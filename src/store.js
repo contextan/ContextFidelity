@@ -26,7 +26,7 @@ export class Store {
       PRAGMA synchronous=FULL;
       PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS projects(id TEXT PRIMARY KEY,name TEXT NOT NULL,created_at TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id),title TEXT NOT NULL,created_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id),title TEXT NOT NULL,created_at TEXT NOT NULL,model_provider TEXT NOT NULL DEFAULT '',model TEXT NOT NULL DEFAULT '');
       CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY,session_id TEXT NOT NULL REFERENCES sessions(id),role TEXT NOT NULL,content TEXT NOT NULL,topics TEXT NOT NULL,created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS decisions(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id),source_id TEXT NOT NULL REFERENCES messages(id),content TEXT NOT NULL,scope TEXT NOT NULL,topics TEXT NOT NULL,version INTEGER NOT NULL,supersedes TEXT REFERENCES decisions(id),status TEXT NOT NULL,created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY,session_id TEXT NOT NULL REFERENCES sessions(id),user_message_id TEXT NOT NULL REFERENCES messages(id),assistant_message_id TEXT REFERENCES messages(id),provider TEXT NOT NULL,model TEXT NOT NULL,status TEXT NOT NULL,error TEXT,validation TEXT,created_at TEXT NOT NULL);
@@ -44,6 +44,9 @@ export class Store {
       CREATE TRIGGER IF NOT EXISTS immutable_candidate_content BEFORE UPDATE OF project_id,session_id,run_id,source_id,title,content,kind,scope,topics,supersedes ON context_candidates BEGIN SELECT RAISE(ABORT,'candidate source is immutable'); END;
     `);
     if (!this.db.prepare('PRAGMA table_info(runs)').all().some(c => c.name === 'purpose')) this.db.exec("ALTER TABLE runs ADD COLUMN purpose TEXT NOT NULL DEFAULT 'chat'");
+    for (const [name, type] of [['model_provider', "TEXT NOT NULL DEFAULT ''"], ['model', "TEXT NOT NULL DEFAULT ''"]]) {
+      if (!this.db.prepare('PRAGMA table_info(sessions)').all().some(c => c.name === name)) this.db.exec(`ALTER TABLE sessions ADD COLUMN ${name} ${type}`);
+    }
     if (!this.db.prepare('PRAGMA table_info(call_results)').all().some(c => c.name === 'diagnostic')) this.db.exec('ALTER TABLE call_results ADD COLUMN diagnostic TEXT');
     for (const [name, type] of [['registration', "TEXT NOT NULL DEFAULT 'manual'"], ['run_id', 'TEXT REFERENCES runs(id)']]) {
       if (!this.db.prepare('PRAGMA table_info(contexts)').all().some(c => c.name === name)) this.db.exec(`ALTER TABLE contexts ADD COLUMN ${name} ${type}`);
@@ -88,11 +91,16 @@ export class Store {
   createSession(projectId, locale = 'ko') {
     if (!this.project(projectId)) throw new Error('프로젝트를 찾을 수 없습니다.');
     const session = { id: id('session'), project_id: projectId, title: systemText('새 대화', locale), created_at: now() };
-    this.db.prepare('INSERT INTO sessions VALUES(?,?,?,?)').run(session.id, projectId, session.title, session.created_at);
+    this.db.prepare('INSERT INTO sessions(id,project_id,title,created_at,model_provider,model) VALUES(?,?,?,?,?,?)').run(session.id, projectId, session.title, session.created_at, '', '');
     return session;
   }
   session(sessionId) { return this.db.prepare('SELECT * FROM sessions WHERE id=?').get(sessionId); }
   sessions(projectId) { return this.db.prepare('SELECT * FROM sessions WHERE project_id=? ORDER BY rowid DESC').all(projectId); }
+  setSessionModel(sessionId, provider, model) {
+    if (!this.session(sessionId)) throw new Error('대화를 찾을 수 없습니다.');
+    this.db.prepare('UPDATE sessions SET model_provider=?,model=? WHERE id=?').run(provider, model, sessionId);
+    return this.session(sessionId);
+  }
   message(messageId) { return decode(this.db.prepare('SELECT * FROM messages WHERE id=?').get(messageId), ['topics']); }
   messages(sessionId) { return this.db.prepare('SELECT * FROM messages WHERE session_id=? ORDER BY rowid').all(sessionId).map(r => decode(r, ['topics'])); }
   addMessage(sessionId, role, content, topics) {

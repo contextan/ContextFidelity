@@ -15,6 +15,52 @@ function fixture(t) {
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
   return { store, project, session, directory };
 }
+test('model preference is saved per conversation and isolated from other sessions', t => {
+  const { store, project, session } = fixture(t);
+  const other = store.createSession(project.id);
+  const updated = store.setSessionModel(session.id, 'chatgpt', 'gpt-6.1-sol');
+  assert.equal(updated.model_provider, 'chatgpt');
+  assert.equal(updated.model, 'gpt-6.1-sol');
+  assert.equal(store.session(other.id).model, '');
+  assert.equal(store.session(other.id).model_provider, '');
+});
+
+test('chat model endpoint persists a selection without changing another conversation', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'contextpulse-session-model-'));
+  const port = 24820 + Math.floor(Math.random() * 300);
+  const requestedModels = [];
+  const app = createApp({ directory, port, fetcher: async (_url, options) => {
+    requestedModels.push(JSON.parse(options.body).model);
+    const text = requestedModels.length === 1 ? 'Answer from this chat model.' : JSON.stringify({ verdict: 'consistent', conflicts: [], note: 'No conflict.' });
+    return new Response(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ content: [{ type: 'output_text', text }] }], usage: { input_tokens: 1, output_tokens: 1 } } })}\n\n`, { headers: { 'Content-Type': 'text/event-stream' } });
+  } });
+  await new Promise(resolve => app.server.listen(port, '127.0.0.1', resolve));
+  t.after(async () => { await new Promise(resolve => app.server.close(resolve)); app.store.close(); rmSync(directory, { recursive: true, force: true }); });
+  const initial = await fetch(`${app.origin}/api/state`), cookie = initial.headers.get('set-cookie').split(';')[0], state = await initial.json();
+  const headers = { 'Content-Type': 'application/json', 'X-ContextPulse-Token': state.csrf, Cookie: cookie };
+  const call = async (path, data) => (await fetch(`${app.origin}/api${path}`, { headers, method: data ? 'POST' : 'GET', ...(data ? { body: JSON.stringify(data) } : {}) })).json();
+  const project = app.store.projects()[0], first = app.store.sessions(project.id)[0], second = app.store.createSession(project.id);
+  await call('/settings', { provider: 'openai', model: '', apiKey: 'fixture-session-model-key', autoContext: false });
+  const selected = await call(`/sessions/${first.id}/model`, { model: 'model-for-first-chat' });
+  assert.equal(selected.session.model_provider, 'openai');
+  assert.equal(selected.session.model, 'model-for-first-chat');
+  const other = await call(`/sessions/${second.id}`);
+  assert.equal(other.session.model, '');
+  assert.equal(other.session.model_provider, '');
+  assert.equal((await call('/state')).settings.model, '');
+  const sent = await call(`/sessions/${first.id}/messages`, { content: 'Use this conversation model.', topics: [] });
+  assert.equal(sent.run_id !== undefined, true);
+  let run;
+  for (let tries = 0; tries < 30; tries++) {
+    run = await call(`/runs/${sent.run_id}`);
+    if (run.status !== 'running') break;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal(run.status, 'no_decisions');
+  assert.ok(run.snapshots.every(snapshot => snapshot.model === 'model-for-first-chat'));
+  assert.deepEqual(requestedModels, ['model-for-first-chat']);
+});
+
 test('answer context shows the versions actually sent and survives edits, archive and decision replacement', async t => {
   const { store, project, session } = fixture(t);
   const saved = store.saveContext(project.id, { title: 'Design', content: 'Use blue <literal>', kind: 'reference', scope: 'topic', topics: ['design'], include_mode: 'auto' });
@@ -28,6 +74,65 @@ test('answer context shows the versions actually sent and survives edits, archiv
   store.register(session.id, 'Remove the sidebar', [], { supersedes: decision.id });
   assert.deepEqual(contextUsage(store.run(run.id)), original);
   assert.ok(run.snapshots[0].payload.includes('Use blue <literal>'));
+});
+
+test('answer receipt separates included and excluded context by topic and retains source evidence', async t => {
+  const { store, project, session } = fixture(t);
+  const productSource = store.addMessage(session.id, 'user', 'Our users are independent builders.', ['Product']);
+  const product = store.saveContext(project.id, { title: 'Product audience', content: productSource.content, kind: 'background', scope: 'topic', topics: ['Product'], include_mode: 'auto', source_id: productSource.id });
+  const designSource = store.addMessage(session.id, 'user', 'Use a blue and white palette.', ['Design']);
+  const design = store.saveContext(project.id, { title: 'Design palette', content: designSource.content, kind: 'reference', scope: 'topic', topics: ['Design'], include_mode: 'auto', source_id: designSource.id });
+  const projectContext = store.saveContext(project.id, { title: 'Project goal', content: 'Help teams maintain relevant context.', kind: 'background', scope: 'project', topics: [], include_mode: 'auto' });
+  const question = store.addMessage(session.id, 'user', 'Who is this product for?', ['Product']);
+
+  const run = await executeRun(store, null, session.id, question, { provider: 'demo', model: 'context-demo', locale: 'en' });
+  const receipt = contextUsage(run, 'en');
+  const generation = run.snapshots.find(snapshot => snapshot.phase === 'generation');
+  const productGroup = receipt.topic_clusters.find(group => group.topic === 'Product');
+  const designGroup = receipt.topic_clusters.find(group => group.topic === 'Design');
+  const projectGroup = receipt.topic_clusters.find(group => group.scope === 'project');
+
+  assert.equal(receipt.selection_mode, 'tags');
+  assert.deepEqual(new Set(receipt.contexts.map(context => context.id)), new Set([product.id, projectContext.id]));
+  assert.equal(productGroup.question_matched, true);
+  assert.equal(productGroup.included_count, 1);
+  assert.equal(designGroup.question_matched, false);
+  assert.equal(designGroup.excluded_count, 1);
+  assert.equal(designGroup.excluded_items[0].source_id, designSource.id);
+  assert.equal(designGroup.reason, 'Outside the question topic');
+  assert.equal(projectGroup.injected_items[0].id, projectContext.id);
+  assert.equal(projectGroup.reason, 'Applies across the project');
+  assert.ok(!generation.payload.includes(design.content));
+  assert.ok(receipt.excluded_contexts.some(context => context.id === design.id && context.source_id === designSource.id));
+});
+
+test('English receipts localize older selector reasons and do not label project scope as a topic match', () => {
+  const run = { snapshots: [{
+    id: 'snapshot-1', phase: 'generation', call_status: 'completed', model: 'test', created_at: 'now',
+    blocks: [
+      { key: 'PROJECT_SCOPE', content: JSON.stringify({ topics: ['Product'] }) },
+      { key: 'CONTEXT_SELECTION', content: JSON.stringify({ mode: 'semantic' }) },
+      { key: 'CONTEXT:legacy', context_id: 'legacy', scope: 'topic', topics: ['Product'], version: 1,
+        content: JSON.stringify({ title: 'Product context', content: 'Audience context', selection_reason: '질문 Topics와 일치' }) },
+      { key: 'CONTEXT:project', context_id: 'project', scope: 'project', topics: [], version: 1,
+        content: JSON.stringify({ title: 'Project context', content: 'Project background', selection_reason: 'Always included' }) },
+    ],
+    excluded: [
+      { type: 'context', id: 'excluded', title: 'Design context', content: 'Design background', scope: 'topic', topics: ['Design'], reason: '질문 주제와 일치' },
+      { type: 'decision', id: 'old-decision', content: 'Earlier criterion', scope: 'project', status: 'superseded', reason: '대체된 결정 · 이력 보관' },
+    ],
+  }] };
+
+  const receipt = contextUsage(run, 'en');
+  const productGroup = receipt.topic_clusters.find(group => group.topic === 'Product');
+  const projectGroup = receipt.topic_clusters.find(group => group.scope === 'project');
+  const designGroup = receipt.topic_clusters.find(group => group.topic === 'Design');
+  const projectDecisions = receipt.topic_clusters.find(group => group.scope === 'project').excluded_items;
+  assert.equal(productGroup.injected_items[0].selection_reason, 'Selected by question meaning');
+  assert.equal(projectGroup.question_matched, false);
+  assert.equal(projectGroup.reason, 'Applies across the project');
+  assert.equal(designGroup.excluded_items[0].selection_reason, 'Excluded based on question meaning');
+  assert.equal(projectDecisions[0].selection_reason, 'Superseded decision · History preserved');
 });
 
 test('validated answer and receipt are available while candidate extraction is still running', async t => {
@@ -99,7 +204,11 @@ test('selection explicitly separates allowed context IDs from recent message IDs
     await chooseContext(store, session.id, question, async (phase, instruction, blocks) => {
       assert.equal(blocks.find(b => b.key === 'CANDIDATE_IDS').content, '[]');
       assert.ok(instruction.includes('CANDIDATE_IDS'));
-      if (locale === 'en') assert.ok(!/[가-힣]/.test(instruction));
+      if (locale === 'en') {
+        assert.ok(!/[가-힣]/.test(instruction));
+        assert.match(instruction, /with a short inclusion or exclusion reason in English/);
+      }
+      if (locale === 'ko') assert.match(instruction, /짧은 선택·제외 이유를 한국어로 적는다/);
       return '{"topics":[],"contexts":[]}';
     }, locale);
   }

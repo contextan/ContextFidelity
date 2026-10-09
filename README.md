@@ -14,6 +14,8 @@ npm start
 
 Open http://127.0.0.1:8899. English is the default; Korean is available at `/ko/`. Both routes share the same projects and conversations. See [한국어 안내](README.ko.md).
 
+See the [current prototype scope](docs/project-summary.md) and [Colosseum submission checklist](docs/submission-readiness.md).
+
 ## What the prototype does
 
 - Connect a ChatGPT account using the official OAuth flow, an OpenAI API key, or a local Ollama model.
@@ -28,7 +30,7 @@ Open http://127.0.0.1:8899. English is the default; Korean is available at `/ko/
 
 ## Connecting a model
 
-In Settings, choose **Continue with ChatGPT**, complete sign-in and consent, then select a model from your account's catalog. Supported requests use the connected ChatGPT plan; validation, correction, selection, and extraction can add calls. Existing ChatGPT conversations are not imported. OAuth and API-key billing paths remain separate.
+OAuth is an optional way for the local app to authenticate ChatGPT model calls; it is not used to create or store context. Projects, conversations, and saved context remain in the app's local database while disconnected. In Settings, choose **Continue with ChatGPT**, complete sign-in and consent, then select a model from your account's catalog. Validation, correction, selection, and extraction can add calls. Existing ChatGPT conversations are not imported. The hosted demo does not use ChatGPT OAuth: it starts in no-call demo mode, and live inference requires the visitor's own API key.
 
 For Ollama, choose the local provider and a loopback URL such as `http://127.0.0.1:11434`. This prototype restricts that endpoint to local addresses.
 

@@ -41,13 +41,13 @@ export function selectContext(store, sessionId, currentMessage, selection = null
   }).slice(-12);
   const blocks = [
     { key: 'PROJECT_SCOPE', content: JSON.stringify({ project_id: session.project_id, project_name: store.project(session.project_id).name, topics: currentMessage.topics }) },
-    ...active.map(d => ({ key: `DECISION:${d.id}`, content: JSON.stringify(d), decision_id: d.id, version: d.version, source_id: d.source_id })),
-    ...materials.selected.map(item => ({ key: `CONTEXT:${item.root_id}`, content: JSON.stringify({ title: item.title, content: item.content, kind: item.kind, scope: item.scope, topics: item.topics, version: item.version, selection_reason: item.selection_reason }), context_id: item.id, root_id: item.root_id, kind: item.kind, version: item.version, source_id: item.source_id })),
+    ...active.map(d => ({ key: `DECISION:${d.id}`, content: JSON.stringify(d), decision_id: d.id, version: d.version, source_id: d.source_id, scope: d.scope, status: d.status })),
+    ...materials.selected.map(item => ({ key: `CONTEXT:${item.root_id}`, content: JSON.stringify({ title: item.title, content: item.content, kind: item.kind, scope: item.scope, topics: item.topics, version: item.version, selection_reason: item.selection_reason }), context_id: item.id, root_id: item.root_id, kind: item.kind, scope: item.scope, topics: item.topics, override: item.override, include_mode: item.include_mode, version: item.version, source_id: item.source_id })),
     ...history.map(m => ({ key: `HISTORY:${m.id}`, content: JSON.stringify({ role: m.role, content: m.content }), source_id: m.id })),
     { key: 'CURRENT_QUESTION', content: currentMessage.content, source_id: currentMessage.id }
   ];
-  const excluded = all.filter(d => !active.some(a => a.id === d.id)).map(d => ({ type: 'decision', id: d.id, content: d.content, reason: d.status !== 'active' ? '대체된 결정 · 이력 보관' : '현재 질문의 주제 범위 밖' }));
-  excluded.push(...materials.excluded.map(item => ({ type: 'context', id: item.id, root_id: item.root_id, title: item.title, content: item.content, version: item.version, reason: item.selection_reason })));
+  const excluded = all.filter(d => !active.some(a => a.id === d.id)).map(d => ({ type: 'decision', id: d.id, source_id: d.source_id, content: d.content, scope: d.scope, status: d.status, topics: d.topics || [], version: d.version, reason: d.status !== 'active' ? '대체된 결정 · 이력 보관' : '현재 질문의 주제 범위 밖' }));
+  excluded.push(...materials.excluded.map(item => ({ type: 'context', id: item.id, root_id: item.root_id, source_id: item.source_id, title: item.title, content: item.content, kind: item.kind, scope: item.scope, status: item.status, override: item.override, include_mode: item.include_mode, topics: item.topics || [], version: item.version, reason: item.selection_reason })));
   for (const m of candidates.filter(m => !history.some(h => h.id === m.id))) excluded.push({ type: 'message', id: m.id, content: m.content, reason: '다른 주제 또는 최근 대화 12개 범위 밖' });
   const evidence = active.map(d => ({ key: `ORIGINAL:${d.source_id}`, content: JSON.stringify({ decision_id: d.id, version: d.version, scope: d.scope, topics: d.topics, source_message: store.message(d.source_id) }), source_id: d.source_id, decision_id: d.id, version: d.version }));
   return { blocks, excluded, active, evidence, materials };

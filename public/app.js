@@ -1,4 +1,4 @@
-const CLIENT_BUILD_ID = '05e57ab8cc37';
+const CLIENT_BUILD_ID = '99e69e87a9ab';
 const LOCALE = /^\/ko(?:\/|$)/.test(location.pathname) ? 'ko' : 'en';
 const DATE_LOCALE = LOCALE === 'ko' ? 'ko-KR' : 'en-US';
 const PAGE_ROUTES = { chat: '', contexts: 'contexts', settings: 'settings', inspector: 'records' };
@@ -13,10 +13,12 @@ const statusLabel = { extracted: 'Automatic registration complete', running: 'Pr
 let state, project, session, detail, selectedRun = null, compare = null;
 let pageName = routeName();
 let topics = [], draft = '', sending = false, poll = null, toastTimer;
+let contextPanelOpen = false;
 let inspectorMode = 'columns';
 const models = new Map();
-let oauthAttempt = { status: 'idle' }, oauthTimer = null, oauthUrl = '', oauthPopup = null, chatgptModelsState = '';
+let oauthAttempt = { status: 'idle' }, oauthTimer = null, oauthUrl = '', oauthPopup = null;
 let modelsLoading = null, syncTask = null;
+const modelErrors = new Map();
 const kindLabel = { background: 'Background', reference: 'Reference', hypothesis: 'Hypothesis' };
 const includeLabel = { auto: 'Select automatically', always: 'Always include in this project', off: 'Exclude by default' };
 let contextPreview = { selected: [], excluded: [] }, contextTab = 'materials', contextFilter = '', contextStatus = 'active', contextKind = 'all', editor = null, previewSequence = 0;
@@ -36,42 +38,45 @@ function toast(message) {
   toastTimer = setTimeout(() => $('#toast').classList.add('hidden'), 5500);
 }
 function button(text, action, attrs = '') { return `<button type="button" data-action="${action}" ${attrs} class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-xs font-medium">${text}</button>`; }
-function pill(text, color = 'slate') { return `<span class="px-2 py-0.5 rounded border text-xs ${color === 'green' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : color === 'red' ? 'bg-rose-50 border-rose-200 text-rose-800' : color === 'amber' ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-slate-50 border-slate-200 text-slate-600'}">${esc(text)}</span>`; }
+function pill(text, color = 'slate') { return `<span class="px-2 py-0.5 rounded border text-xs ${color === 'green' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : color === 'red' ? 'bg-rose-50 border-rose-200 text-rose-800' : color === 'amber' ? 'bg-amber-50 border-amber-200 text-amber-800' : color === 'indigo' ? 'bg-indigo-50 border-indigo-200 text-indigo-800' : 'bg-slate-50 border-slate-200 text-slate-600'}">${esc(text)}</span>`; }
+function countLabel(count, koLabel, enPlural, enSingular = enPlural) { return LOCALE === 'ko' ? `${koLabel} ${count}\uac1c` : `${count} ${count === 1 ? enSingular : enPlural}`; }
 function raw(value) { return `<pre class="bg-slate-900 text-indigo-200 rounded-lg p-3 text-xs overflow-auto max-h-[600px]">${esc(typeof value === 'string' ? value : JSON.stringify(value, null, 2))}</pre>`; }
 function topicValues(value) { return [...new Set(value.split(/[,，]/).map(t => t.trim().replace(/^#/, '')).filter(Boolean))].slice(0, 12); }
 function demoNotice() { return `<div class="px-4 py-2 bg-amber-50 border-b border-amber-200 text-amber-900 text-xs">Demo record · No model call · This fixed example demonstrates the correction flow.</div>`; }
 function oauthCardHtml() {
-  if (state.mode === 'hosted') return `<section class="bg-white border border-slate-200 rounded-xl p-5 space-y-3"><h2 class="font-semibold">Public demo</h2><p class="text-sm text-slate-600">Conversations and credentials are isolated per visitor. Use demo mode or your own API key. ChatGPT OAuth is available in the local app.</p></section>`;
+  if (state.mode === 'hosted') return `<section class="bg-white border border-slate-200 rounded-xl p-5 space-y-3"><h2 class="font-semibold">Public demo</h2><p class="text-sm text-slate-600">This demo works without sign-in. The default demo makes no model calls; to get live answers, configure your own API key. Conversations and context are stored separately for each visitor.</p></section>`;
   const pending = ['pending', 'processing'].includes(oauthAttempt.status);
-  const account = state.auth.accounts.find(a => a.active);
-  const choices = models.get('chatgpt') || [];
-  const savedModel = state.settings.provider === 'chatgpt' ? state.settings.model : '';
-  const shownChoices = savedModel && !choices.some(m => m.id === savedModel) ? [{ id: savedModel, name: savedModel }, ...choices] : choices;
-  const status = pending ? oauthAttempt.message : state.auth.chatgptConnected ? 'Account connected' : state.auth.signedIn ? 'Signed in · Plan permission required' : 'Account not connected';
-  return `<section id="oauth-card" class="bg-white border border-slate-200 rounded-xl p-5 space-y-4"><div class="flex flex-wrap justify-between items-start gap-3"><div><h2 class="font-semibold">Connect your ChatGPT account</h2><p class="text-sm text-slate-500 mt-2">Use your ChatGPT plan for answers, validation, and context management in this app.</p></div>${pill(status, state.auth.chatgptConnected ? 'green' : pending ? 'amber' : 'slate')}</div><div class="flex flex-wrap gap-2 items-center"><button type="button" data-action="login" class="rounded-lg bg-slate-900 text-white px-4 py-2 text-sm" ${pending ? 'disabled' : ''}>Continue with ChatGPT</button>${state.auth.accounts.length ? '<span class="text-xs text-slate-500">Add another account or workspace</span>' : ''}${state.auth.signedIn ? button('Disconnect', 'disconnect') : ''}<a href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener noreferrer" class="text-xs text-indigo-700 underline">Manage ChatGPT usage</a></div><p class="text-xs text-slate-500">Sign in and approve access in the official login window. Existing ChatGPT conversations are not imported.</p>
+  const activeAccount = state.auth.accounts.find(a => a.active);
+  const connectedAccounts = state.auth.accounts.filter(a => a.connected);
+  const status = pending ? oauthAttempt.message : state.auth.chatgptConnected ? 'Account connected' : state.auth.signedIn ? 'Plan permission required' : '';
+  return `<section id="oauth-card" class="bg-white border border-slate-200 rounded-xl p-5 space-y-4"><div class="flex flex-wrap justify-between items-start gap-3"><div><h2 class="font-semibold">ChatGPT model connection · optional</h2><p class="text-sm text-slate-500 mt-2">ChatGPT OAuth is an optional connection for live model answers and automatic context processing. Projects, conversations, and saved context remain available and manageable without signing in.</p></div>${status ? pill(status, state.auth.chatgptConnected ? 'green' : pending ? 'amber' : 'slate') : ''}</div><div class="flex flex-wrap gap-2 items-center">${state.auth.signedIn ? button('Disconnect', 'disconnect') : ''}${state.auth.chatgptConnected ? '<a href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener noreferrer" class="text-xs text-indigo-700 underline">Manage ChatGPT usage</a>' : ''}</div><p class="text-xs text-slate-500">OAuth only authenticates the model provider. Existing ChatGPT conversations are not imported.</p>
   ${pending ? `<div role="status" class="rounded-lg bg-indigo-50 border border-indigo-200 p-3 space-y-2"><p class="text-sm text-indigo-900">${esc(oauthAttempt.message)}</p><p class="text-xs text-indigo-700">The app checks your connection after approval. If the login window did not open, use the button below.</p><div class="flex flex-wrap gap-2">${button('Continue login in this tab', 'oauth-continue')}${oauthAttempt.status === 'pending' ? button('Cancel login', 'oauth-cancel') : ''}</div></div>` : ['failed', 'expired', 'cancelled', 'permission_required'].includes(oauthAttempt.status) ? `<p role="status" class="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">${esc(oauthAttempt.message)}</p>` : ''}
-  ${state.auth.accounts.length ? `<div class="space-y-2">${state.auth.accounts.map(a => `<div class="p-3 rounded-lg border ${a.active ? 'border-indigo-200 bg-indigo-50' : 'border-slate-200'} flex flex-wrap justify-between items-center gap-3"><div><p class="text-sm font-medium">${esc(a.label)}</p><p class="mt-1 text-xs text-slate-500">${a.active ? 'Active account · ' : ''}${!a.connected ? 'Reconnect required' : a.planEnabled ? 'ChatGPT plan access approved' : 'Plan permission required'}</p></div><div class="flex flex-wrap gap-2">${!a.active && a.connected ? button('Use this account', 'choose-account', `data-client="${esc(a.client_id)}" ${pending ? 'disabled' : ''}`) : ''}${button(a.connected && !a.planEnabled ? 'Approve plan access' : 'Reconnect', 'reauth', `data-client="${esc(a.client_id)}" data-consent="${a.connected && !a.planEnabled}" ${pending ? 'disabled' : ''}`)}</div></div>`).join('')}</div>` : ''}
-  ${state.auth.chatgptConnected ? `<form id="oauth-model-form" class="border-t border-slate-200 pt-4 space-y-3"><label class="block text-sm">Model for this account<select id="oauth-model" required class="block w-full rounded-lg border-slate-200 mt-2 text-sm" ${shownChoices.length ? '' : 'disabled'}><option value="">Select a model</option>${shownChoices.map(m => `<option value="${esc(m.id)}" ${state.settings.provider === 'chatgpt' && state.settings.model === m.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select></label><p class="text-xs text-slate-500">${esc(chatgptModelsState || (savedModel ? 'You can chat with the saved model.' : 'Load the models available to this account.'))}</p><div class="flex flex-wrap gap-2"><button class="rounded-lg bg-indigo-600 text-white px-4 py-2 text-sm" ${shownChoices.length ? '' : 'disabled'}>Start chatting with this model</button>${button('Refresh models', 'oauth-models')}</div></form>` : account && !account.planEnabled ? '<p class="text-xs text-amber-900">This account cannot make model requests until plan access is approved.</p>' : ''}</section>`;
+  ${connectedAccounts.length ? `<div class="space-y-2">${connectedAccounts.map(a => `<div class="p-3 rounded-lg border ${a.active ? 'border-indigo-200 bg-indigo-50' : 'border-slate-200'} flex flex-wrap justify-between items-center gap-3"><div><p class="text-sm font-medium">${esc(a.label)}</p><p class="mt-1 text-xs text-slate-500">${a.active ? 'Active account · ' : ''}${a.planEnabled ? 'ChatGPT plan access approved' : 'Plan permission required'}</p></div>${!a.active ? button('Use this account', 'choose-account', `data-client="${esc(a.client_id)}" ${pending ? 'disabled' : ''}`) : ''}</div>`).join('')}</div>` : ''}
+  ${state.auth.signedIn && activeAccount && !activeAccount.planEnabled ? '<p class="text-xs text-amber-900">If plan access is needed, continue from the bottom-left button.</p>' : ''}</section>`;
 }
 function renderOAuthCard() { const card = $('#oauth-card'); if (card) card.outerHTML = oauthCardHtml(); }
-async function loadChatGPTModels(force = false) {
-  if (modelsLoading?.accountId === state.auth.activeClientId) return modelsLoading.promise;
-  if (!force && models.has('chatgpt')) { renderOAuthCard(); return; }
-  const loading = { accountId: state.auth.activeClientId };
-  loading.promise = fetchChatGPTModels().finally(() => { if (modelsLoading === loading) modelsLoading = null; });
-  modelsLoading = loading; return loading.promise;
-}
-async function fetchChatGPTModels() {
-  if (!state.auth.chatgptConnected) return;
-  const accountId = state.auth.activeClientId;
-  chatgptModelsState = 'Checking available models.'; renderOAuthCard();
-  try {
-    const result = await api('/models', 'POST', { provider: 'chatgpt' });
-    if (state.auth.activeClientId !== accountId) return;
-    models.set('chatgpt', result.models);
-    chatgptModelsState = result.models.length ? `${result.models.length} models available. Select a model.` : 'No models are available to this account. Check account permissions.';
-  } catch (error) { if (state.auth.activeClientId !== accountId) return; models.delete('chatgpt'); chatgptModelsState = error.message; }
-  renderOAuthCard();
+async function loadModelsForProvider(provider = state.settings.provider, force = false) {
+  if (provider === 'chatgpt' && !state.auth.chatgptConnected) return;
+  const accountId = provider === 'chatgpt' ? state.auth.activeClientId : null;
+  if (modelsLoading?.provider === provider && modelsLoading.accountId === accountId) return modelsLoading.promise;
+  if (!force && models.has(provider)) return;
+  const loading = { provider, accountId, promise: null };
+  modelsLoading = loading;
+  modelErrors.delete(provider);
+  renderShell();
+  loading.promise = (async () => {
+    try {
+      const result = await api('/models', 'POST', { provider, ollamaUrl: state.settings.ollamaUrl });
+      if (provider === 'chatgpt' && state.auth.activeClientId !== accountId) return;
+      models.set(provider, result.models);
+    } catch (error) {
+      if (provider === 'chatgpt' && state.auth.activeClientId !== accountId) return;
+      models.delete(provider); modelErrors.set(provider, error.message);
+    } finally {
+      if (modelsLoading === loading) { modelsLoading = null; renderShell(); }
+    }
+  })();
+  return loading.promise;
 }
 function showPlanWelcome() {
   if (!state.auth.accounts.some(a => a.active && a.connected && a.welcomePending) || $('#plan-welcome')) return;
@@ -83,12 +88,12 @@ function showPlanWelcome() {
 }
 async function oauthCompleted() {
   clearTimeout(oauthTimer); oauthTimer = null; oauthUrl = '';
-  state = await api('/state'); models.delete('chatgpt'); chatgptModelsState = '';
+  state = await api('/state'); models.delete('chatgpt'); modelErrors.delete('chatgpt');
   sessionStorage.removeItem('contextpulse.oauthAttempt');
-  await navigate(state.settings.model && state.auth.chatgptConnected ? 'chat' : 'settings');
+  await navigate(state.auth.chatgptConnected ? 'chat' : 'settings');
   if (oauthPopup && !oauthPopup.closed) oauthPopup.close(); oauthPopup = null;
   toast(oauthAttempt.message);
-  showPlanWelcome(); await loadChatGPTModels();
+  showPlanWelcome();
 }
 function watchOAuth() {
   clearTimeout(oauthTimer);
@@ -115,6 +120,34 @@ async function startOAuth(target) {
   } catch (error) { oauthPopup?.close(); oauthAttempt = { status: 'failed', message: error.message }; renderOAuthCard(); throw error; }
 }
 function shortId(value) { return value?.slice(0, 14) || ''; }
+
+function currentChatModel() {
+  return session?.model && session.model_provider === state.settings.provider ? session.model : state.settings.model || '';
+}
+function renderModelPicker() {
+  const picker = $('#model-picker');
+  if (!picker) return;
+  const wasOpen = $('#model-menu')?.open || false;
+  picker.classList.toggle('hidden', pageName !== 'chat' || chatNeedsLogin());
+  picker.innerHTML = pageName === 'chat' && !chatNeedsLogin() ? modelPickerHtml() : '';
+  if (wasOpen) { const menu = $('#model-menu'); if (menu) menu.open = true; }
+}
+function modelPickerHtml() {
+  const provider = state.settings.provider;
+  const available = [...(models.get(provider) || [])];
+  const current = currentChatModel();
+  if (current && !available.some(model => model.id === current)) available.unshift({ id: current, name: current });
+  const loading = modelsLoading?.provider === provider && modelsLoading.accountId === (provider === 'chatgpt' ? state.auth.activeClientId : null);
+  const connected = provider === 'demo' || provider === 'ollama' || (provider === 'chatgpt' ? state.auth.chatgptConnected : state.auth.apiKeySet);
+  const label = available.find(model => model.id === current)?.name || (current || 'Choose a model');
+  const busy = (state.busy || []).length > 0;
+  const options = available.map(model => `<button type="button" role="menuitemradio" aria-checked="${model.id === current}" data-action="model-select" data-model="${esc(model.id)}" class="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50 ${model.id === current ? 'text-indigo-700 bg-indigo-50' : 'text-slate-700'}" ${busy || loading ? 'disabled' : ''}><span class="truncate">${esc(model.name)}</span>${model.id === current ? '<span class="material-symbols-outlined text-[18px]">check</span>' : ''}</button>`).join('');
+  const emptyState = loading ? '<p class="px-3 py-3 text-xs text-slate-500" role="status">Loading models…</p>'
+    : !connected ? `<p class="px-3 py-3 text-xs text-slate-500">${provider === 'chatgpt' ? 'Connect a ChatGPT account.' : 'Add your API key in Settings.'}</p>`
+      : modelErrors.has(provider) ? `<p class="px-3 py-3 text-xs text-rose-700" role="status">${esc(modelErrors.get(provider))}</p>`
+        : !available.length ? '<p class="px-3 py-3 text-xs text-slate-500">No models are available.</p>' : '';
+  return `<details id="model-menu" class="relative"><summary aria-label="Choose a model: ${esc(label)}" class="list-none cursor-pointer flex max-w-[180px] items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"><span class="material-symbols-outlined text-indigo-600 text-[18px]">auto_awesome</span><span class="truncate">${esc(label)}</span><span class="material-symbols-outlined text-slate-400 text-[18px]">expand_more</span></summary><div role="menu" aria-label="Choose a model" class="absolute right-0 bottom-full z-[60] mb-2 w-72 max-w-[calc(100vw-24px)] rounded-xl border border-slate-200 bg-white p-2 shadow-xl"><p class="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Available models</p>${options || emptyState}<div class="mt-2 border-t border-slate-100 pt-2">${button('Refresh', 'models-refresh', loading || busy ? 'disabled' : '')}</div></div></details>`;
+}
 
 async function loadProject(projectId, sessionId) {
   const previousSession = session?.id;
@@ -170,16 +203,93 @@ function startPolling() {
     } catch (error) { clearInterval(poll); poll = null; sending = false; toast(error.message); }
   }, 1000);
 }
+function renderSessionList() {
+  const list = $('#session-list');
+  if (!list) return;
+  list.innerHTML = project.sessions.length ? project.sessions.map(item => {
+    const untitled = ['\uc0c8 \ub300\ud654', 'New conversation'].includes(item.title);
+    const title = untitled ? 'New conversation' : item.title;
+    const current = item.id === session.id;
+    return `<button type="button" data-session-id="${esc(item.id)}" aria-current="${current ? 'page' : 'false'}" title="${esc(title)}" class="sidebar-session"><span class="material-symbols-outlined">chat_bubble_outline</span><span class="sidebar-session-title">${esc(title)}</span></button>`;
+  }).join('') : '<p class="sidebar-empty">No conversations yet.</p>';
+}
+function chatNeedsLogin() {
+  return state.settings.provider === 'chatgpt' && !state.auth.chatgptConnected;
+}
+function closeSidebar() {
+  const sidebar = $('#app-sidebar');
+  const mobile = window.innerWidth <= 850;
+  sidebar?.classList.remove('is-open');
+  if (sidebar) {
+    sidebar.inert = mobile;
+    sidebar.setAttribute('aria-hidden', String(mobile));
+  }
+  $('#sidebar-toggle')?.setAttribute('aria-expanded', 'false');
+  document.body.classList.remove('sidebar-drawer-open');
+  if (mobile) $('#sidebar-toggle')?.focus();
+}
+function openSidebar() {
+  const sidebar = $('#app-sidebar');
+  if (!sidebar) return;
+  sidebar.inert = false;
+  sidebar.setAttribute('aria-hidden', 'false');
+  sidebar.classList.add('is-open');
+  $('#sidebar-toggle')?.setAttribute('aria-expanded', 'true');
+  document.body.classList.add('sidebar-drawer-open');
+  (sidebar.querySelector('[data-session-id]') || $('#new-chat'))?.focus();
+}
+function syncSidebarAccessibility() {
+  const sidebar = $('#app-sidebar');
+  if (!sidebar) return;
+  const mobile = window.innerWidth <= 850;
+  const open = mobile && sidebar.classList.contains('is-open');
+  sidebar.inert = mobile && !open;
+  sidebar.setAttribute('aria-hidden', String(mobile && !open));
+  $('#sidebar-toggle')?.setAttribute('aria-expanded', String(open));
+}
 function renderShell() {
   $('#brand-link').href = routePath('chat');
-  $('#language-switch').href = routePath(pageName, LOCALE === 'ko' ? 'en' : 'ko');
-  $('#language-switch').textContent = LOCALE === 'ko' ? 'English' : String.fromCodePoint(0xd55c, 0xad6d, 0xc5b4);
-  $('#sidebar-model').textContent = state.settings.model || 'Select a model';
-  $('#sidebar-provider').textContent = { chatgpt: 'ChatGPT', openai: 'API', ollama: 'Local', demo: 'Demo' }[state.settings.provider];
   $('#workspace-name').textContent = project.project.name;
-  $('#project-switch .sidebar-label').textContent = project.project.name;
+  $('#project-name').textContent = project.project.name;
+  renderSessionList();
   $('#header-topics').textContent = topics.length ? 'Auto topic: ' + topics.map(t => `#${t}`).join(' ') : 'Topics managed automatically';
-  $('#connection-badge').textContent = state.settings.provider === 'demo' ? 'Demo mode' : state.settings.provider === 'chatgpt' ? state.auth.chatgptConnected ? state.settings.model ? 'ChatGPT connected' : 'Account connected · Select a model' : 'Model not connected' : state.settings.model ? 'Model selected' : 'No model selected';
+  const settingsTab = $('#settings-tab');
+  const loginRequired = chatNeedsLogin();
+  const pendingLogin = ['pending', 'processing'].includes(oauthAttempt.status);
+  const activeAccount = state.auth.accounts.find(account => account.active);
+  if (loginRequired) {
+    const action = state.auth.signedIn && activeAccount ? 'reauth' : 'login';
+    settingsTab.removeAttribute('data-page');
+    settingsTab.dataset.action = action;
+    if (action === 'reauth') {
+      settingsTab.dataset.client = activeAccount.client_id;
+      settingsTab.dataset.consent = 'true';
+    } else {
+      delete settingsTab.dataset.client;
+      delete settingsTab.dataset.consent;
+    }
+    settingsTab.disabled = pendingLogin;
+    settingsTab.setAttribute('aria-label', pendingLogin ? 'Checking sign-in' : state.auth.signedIn ? 'Approve plan access' : 'Log in with ChatGPT');
+    settingsTab.title = pendingLogin ? 'Checking sign-in' : state.auth.signedIn ? 'Approve plan access' : 'Log in with ChatGPT';
+    settingsTab.classList.remove('sidebar-settings-tab');
+    settingsTab.classList.add('sidebar-login-tab');
+    settingsTab.innerHTML = `<span class="material-symbols-outlined">${pendingLogin ? 'hourglass_top' : 'login'}</span><span>${pendingLogin ? 'Checking sign-in' : state.auth.signedIn ? 'Approve plan access' : 'Log in with ChatGPT'}</span>`;
+  } else {
+    settingsTab.dataset.page = 'settings';
+    delete settingsTab.dataset.action;
+    delete settingsTab.dataset.client;
+    delete settingsTab.dataset.consent;
+    settingsTab.disabled = false;
+    settingsTab.setAttribute('aria-label', 'Settings');
+    settingsTab.title = 'Settings';
+    settingsTab.classList.remove('sidebar-login-tab');
+    settingsTab.classList.add('sidebar-settings-tab');
+    settingsTab.innerHTML = '<span class="material-symbols-outlined">tune</span><span>Settings</span>';
+  }
+  const contextToggle = $('#context-panel-toggle');
+  contextToggle?.classList.toggle('hidden', pageName !== 'chat');
+  contextToggle?.setAttribute('aria-expanded', String(pageName === 'chat' && contextPanelOpen));
+  renderModelPicker();
   document.querySelectorAll('[data-page]').forEach(el => {
     const active = el.dataset.page === pageName;
     el.classList.toggle('bg-indigo-50', active); el.classList.toggle('text-indigo-700', active);
@@ -187,6 +297,7 @@ function renderShell() {
   });
 }
 function render() {
+  if (pageName !== 'chat') { document.body.classList.remove('chat-mode'); contextPanelOpen = false; }
   renderShell();
   if (pageName === 'chat') renderChat();
   if (pageName === 'contexts') renderContexts();
@@ -197,13 +308,16 @@ function messageHtml(message) {
   const run = detail.runs.find(r => r.assistant_message_id === message.id);
   const ai = message.role === 'assistant';
   if (message.role === 'system') return `<div id="${esc(message.id)}" class="text-xs text-emerald-700 px-2 py-1">${esc(message.content)}</div>`;
-  const time = new Date(message.created_at).toLocaleTimeString(DATE_LOCALE, { hour: '2-digit', minute: '2-digit' });
-  return `<article id="${esc(message.id)}" class="flex flex-col gap-2 w-full">
-    <div class="flex items-center justify-between text-xs text-slate-500"><span class="font-semibold ${ai ? 'text-indigo-900' : 'text-slate-900'}">${ai ? 'ContextPulse Assistant' : 'You'}</span><span>${time}</span></div>
-    ${run ? `<div class="flex flex-wrap items-center justify-between gap-2 p-2 rounded-lg border ${['uncertain', 'unresolved'].includes(run.status) ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-200'}">${pill(run.status === 'running' && run.assistant_message_id ? 'Answer checked · registering context' : statusLabel[run.status], run.status === 'corrected' || run.status === 'consistent' ? 'green' : 'amber')}${run.provider === 'demo' ? pill('Demo · No model call', 'amber') : ''}${button('View correction and context', 'inspect', `data-run="${esc(run.id)}"`)}</div>` : ''}
-    <div class="p-4 rounded-xl ${ai ? 'bg-white border-2 border-indigo-200' : 'bg-slate-100 border border-slate-300'} shadow-sm"><div class="message-body">${esc(message.content)}</div></div>
-    <div class="flex items-center justify-between gap-2">${run?.validation?.context_warning ? `<p class="text-xs text-amber-800">${esc(run.ui_warning || run.validation.context_warning)}</p>` : ''}${run?.validation?.note ? `<details class="text-xs text-slate-500"><summary>Validation note</summary><p class="mt-2">${esc(run.validation.note)}</p></details>` : ''}</div>
-    ${run ? usedContextHtml(run) : ''}${run?.validation?.automatically_registered?.length ? `<p class="text-xs text-emerald-700">Context ${run.validation.automatically_registered.length} automatically registered · linked to originals</p>` : ''}
+  return `<article id="${esc(message.id)}" class="chat-message ${ai ? 'chat-message-assistant' : 'chat-message-user'}">
+    <div class="chat-message-content">
+      <div class="chat-message-heading"><span class="${ai ? 'chat-assistant-name' : 'chat-user-name'}">${ai ? 'ContextPulse' : 'You'}</span></div>
+      <div class="chat-message-bubble ${ai ? 'chat-assistant-bubble' : 'chat-user-bubble'}"><div class="message-body">${esc(message.content)}</div></div>
+      ${run ? `<div class="chat-run-meta">${pill(run.status === 'running' && run.assistant_message_id ? 'Answer checked · registering context' : statusLabel[run.status], run.status === 'corrected' || run.status === 'consistent' ? 'green' : 'amber')}${run.provider === 'demo' ? pill('Demo · No model call', 'amber') : ''}${button('Validation details', 'inspect', `data-run="${esc(run.id)}"`)}</div>` : ''}
+      ${run?.validation?.context_warning ? `<p class="mt-2 text-xs text-amber-800">${esc(run.ui_warning || run.validation.context_warning)}</p>` : ''}
+      ${run?.validation?.note ? `<details class="mt-2 text-xs text-slate-500"><summary>Validation note</summary><p class="mt-2">${esc(run.validation.note)}</p></details>` : ''}
+      ${run ? usedContextHtml(run) : ''}
+      ${run?.validation?.automatically_registered?.length ? `<p class="mt-2 text-xs text-emerald-700">Context ${run.validation.automatically_registered.length} automatically registered · linked to originals</p>` : ''}
+    </div>
   </article>`;
 }
 function progressLabel() {
@@ -215,28 +329,189 @@ function usedContextHtml(run) {
   const used = run.context_usage;
   if (!used) return `<p class="text-xs text-slate-500">No preserved input is available for this answer.</p>`;
   const item = (value, label) => `<div class="p-3 bg-white rounded border border-slate-200 space-y-2"><div class="flex flex-wrap items-center gap-2 text-xs">${pill(label)}${value.version ? `<span>v${value.version}</span>` : ''}${value.title ? `<strong>${esc(value.title)}</strong>` : ''}${value.topics?.length ? `<span>${esc(value.topics.map(t => '#' + t).join(' '))}</span>` : ''}</div><p class="message-body text-sm">${esc(value.content)}</p>${value.selection_reason ? `<p class="text-xs text-slate-500">${esc(value.selection_reason)}</p>` : ''}${value.source_id ? button('View source', 'source', `data-message="${esc(value.source_id)}"`) : ''}</div>`;
-  return `<section class="answer-context rounded-xl border border-indigo-200 bg-indigo-50 p-3 space-y-3" data-context-run="${esc(run.id)}"><div class="flex flex-wrap gap-2 items-center justify-between"><h3 class="text-sm font-semibold text-indigo-900">Context sent for this answer</h3><span class="text-xs text-slate-500">${esc(used.model)} · ${phaseLabel[used.phase]}</span></div><div class="flex flex-wrap gap-2"><span class="text-xs text-slate-600">Topics inferred from this question:</span>${used.topics.map(t => pill(`#${t}`)).join('')}${pill(`Saved context ${used.contexts.length}`)}${pill(`Conversation context ${used.decisions.length}`)}${pill(`Earlier messages ${used.history.length}`)}</div>${used.decisions.length ? `<div class="space-y-1">${used.decisions.map(d => `<p class="text-xs text-indigo-900">${esc(d.content.length > 180 ? d.content.slice(0, 180) + '…' : d.content)} · v${d.version}</p>`).join('')}</div>` : ''}${used.contexts.length ? `<div class="flex flex-wrap gap-2">${used.contexts.map(c => `<span class="text-xs text-indigo-800">${esc(c.title)} · v${c.version}</span>`).join('')}</div>` : ''}<p class="text-xs text-slate-500">Frozen when this answer was generated. Later messages and newly saved context are excluded.</p><details><summary class="text-xs text-indigo-800 cursor-pointer">View contents and sources</summary><div class="space-y-2 mt-3">${used.current_question ? item(used.current_question, 'Question for this answer · not saved context') : ''}${used.contexts.map(c => item(c, kindLabel[c.kind] || 'Reference')).join('')}${used.decisions.map(d => item(d, 'Context identified from the conversation')).join('')}${used.history.map(h => item(h, h.role === 'user' ? 'Earlier user message' : 'Earlier answer')).join('')}${!used.contexts.length && !used.decisions.length && !used.history.length ? '<p class="text-sm text-slate-500">Only the current question was sent, with no additional context.</p>' : ''}</div></details>${button('Full input and comparison', 'inspect', `data-run="${esc(run.id)}"`)}</section>`;
+  const topicItem = (value, included) => {
+    const title = value.title || value.content?.slice(0, 64) || 'No content';
+    const label = value.entry_type === 'conversation' ? 'Context identified from the conversation' : kindLabel[value.kind] || 'Reference';
+    return included
+      ? `<div class="rounded border border-emerald-100 bg-white p-2.5 space-y-1.5"><div class="flex flex-wrap items-center gap-2 text-[11px]">${pill('Included in request', 'green')}${pill(label)}${value.version ? `<span>v${value.version}</span>` : ''}<strong>${esc(title)}</strong></div><p class="text-xs text-slate-700">${esc(value.selection_reason || 'Included in the request for this answer')}</p>${value.source_id ? button('View source', 'source', `data-message="${esc(value.source_id)}"`) : ''}</div>`
+      : `<details class="rounded border border-slate-200 bg-white p-2.5 text-[11px]"><summary class="cursor-pointer text-slate-700">Excluded · ${esc(title)}${value.version ? ` · v${value.version}` : ''}</summary><div class="mt-2 space-y-2"><p class="message-body text-xs text-slate-600">${esc(value.content || '')}</p><p class="text-slate-500">${esc(value.selection_reason || 'Not included in this request')}</p>${value.source_id ? button('View source', 'source', `data-message="${esc(value.source_id)}"`) : ''}</div></details>`;
+  };
+
+  const includedCount = used.contexts.length + used.decisions.length + used.history.length;
+  const excludedCount = used.excluded_contexts.length + used.excluded_decisions.length;
+  return `<details class="answer-context rounded-xl border border-indigo-200 bg-indigo-50/70" data-context-run="${esc(run.id)}">
+    <summary class="answer-context-summary"><span class="font-semibold">Context sent with this answer</span><span class="text-xs font-normal text-slate-500">${countLabel(includedCount, 'Included', 'items sent', 'item sent')} · ${countLabel(excludedCount, 'Excluded', 'items excluded', 'item excluded')} · ${esc(used.model)}</span></summary>
+    <div class="px-4 pb-4 space-y-4">
+    <div class="flex flex-wrap gap-2 items-center justify-end border-b border-indigo-100 pb-3 text-xs text-slate-500">
+      <span>${esc(phaseLabel[used.phase] || used.phase)}</span>
+    </div>
+
+    <div class="space-y-2">
+      <div class="flex flex-wrap items-center justify-between text-xs gap-2">
+        <span class="font-medium text-slate-700">Topics inferred from the question · ${used.selection_mode === 'semantic' ? 'Semantic selection' : 'Tag and rule-based selection'}</span>
+        <div class="flex gap-1.5">
+          ${pill(countLabel(used.contexts.length, 'Stored contexts included', 'stored contexts included', 'stored context included'), 'green')}
+          ${pill(countLabel(used.decisions.length, 'Conversation context included', 'conversation context included'))}
+          ${pill(countLabel(used.excluded_contexts.length, 'Stored contexts excluded', 'stored contexts excluded', 'stored context excluded'))}
+          ${pill(countLabel(used.excluded_decisions.length, 'Conversation context excluded', 'conversation context excluded'))}
+        </div>
+      </div>
+      <div class="flex flex-wrap gap-1.5">${used.topics.length ? used.topics.map(topic => pill(`#${topic}`, 'indigo')).join('') : '<span class="text-xs text-slate-500">No topic was detected.</span>'}</div>
+      ${used.selection_warning ? `<p class="rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">${esc(used.selection_warning)}</p>` : ''}
+      ${used.topic_clusters?.length ? `
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+          ${used.topic_clusters.map(cluster => `
+            <div class="rounded-lg border ${cluster.included_count ? 'border-emerald-200 bg-white' : 'border-slate-200 bg-slate-50'} p-3 space-y-2">
+              <div class="flex items-center justify-between gap-1">
+                <span class="font-semibold text-xs text-slate-900">${cluster.scope === 'project' ? esc(cluster.topic) : `#${esc(cluster.topic)}`}</span>
+                <div class="flex flex-wrap justify-end gap-1">
+                  ${cluster.scope === 'project' ? '' : pill(cluster.question_matched ? 'Matches the question topic' : 'Outside the question topics', cluster.question_matched ? 'indigo' : 'slate')}
+                  ${cluster.included_count ? pill(countLabel(cluster.included_count, 'Included', 'items included', 'item included'), 'green') : ''}
+                  ${cluster.excluded_count ? pill(countLabel(cluster.excluded_count, 'Excluded', 'items excluded', 'item excluded'), 'slate') : ''}
+                </div>
+              </div>
+              <p class="text-[11px] text-slate-500">${esc(cluster.reason)}</p>
+              <div class="space-y-1.5 pt-1.5 border-t border-slate-100">
+                ${cluster.injected_items.map(it => topicItem(it, true)).join('')}
+                ${cluster.excluded_items.map(it => topicItem(it, false)).join('')}
+          ${!cluster.injected_items.length && !cluster.excluded_items.length ? '<p class="text-[11px] text-slate-500">No saved context is linked to this topic.</p>' : ''}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      ` : `
+        <div class="flex flex-wrap gap-2 text-xs">
+          <span class="text-slate-600">Topics inferred from this question:</span>
+          ${used.topics.map(t => pill(`#${t}`)).join('')}
+          ${pill(countLabel(used.contexts.length, 'Stored context', 'stored contexts', 'stored context'))}
+          ${pill(countLabel(used.decisions.length, 'Conversation context', 'conversation context entries', 'conversation context entry'))}
+          ${pill(countLabel(used.history.length, 'Earlier message', 'earlier messages', 'earlier message'))}
+        </div>
+      `}
+    </div>
+
+    <div class="space-y-2 pt-2 border-t border-indigo-100">
+      <div class="flex items-center justify-between text-xs">
+        <span class="font-medium text-slate-700">Content actually included in the model request</span>
+        <span class="text-[11px] text-slate-500">Input saved when the question was processed</span>
+      </div>
+      <div class="space-y-2">
+        ${used.current_question ? item(used.current_question, 'Question for this answer · not saved context') : ''}
+        ${used.contexts.map(c => item(c, kindLabel[c.kind] || 'Reference')).join('')}
+        ${used.decisions.map(d => item(d, 'Context identified from the conversation')).join('')}
+        ${used.history.map(h => item(h, h.role === 'user' ? 'Earlier user message' : 'Earlier answer')).join('')}
+        ${!used.contexts.length && !used.decisions.length && !used.history.length ? '<p class="text-xs text-slate-500 bg-white p-2.5 rounded border border-slate-200">Only the current question was sent, with no additional context.</p>' : ''}
+      </div>
+    </div>
+
+    <div class="flex flex-wrap items-center justify-between gap-2 pt-1 text-xs">
+      <span class="text-slate-500">Receipt of context frozen at the moment of the question.</span>
+      ${button('Full input and comparison', 'inspect', `data-run="${esc(run.id)}"`)}
+    </div>
+    </div>
+  </details>`;
 }
 function renderChat() {
+  const previousStream = $('#chat-stream');
+  const previousTop = previousStream?.scrollTop || 0;
+  const wasNearBottom = !previousStream || previousStream.scrollHeight - previousStream.scrollTop - previousStream.clientHeight < 100;
   const busy = sending || detail.runs.some(r => r.status === 'running');
+  const loginRequired = chatNeedsLogin();
   const failed = detail.runs.filter(r => r.status === 'failed');
-  $('#view').innerHTML = `<div class="bg-white border-b border-slate-200 px-4 py-2 flex flex-wrap gap-3 items-center justify-between"><select id="session-select" aria-label="Conversation" class="rounded border-slate-200 text-xs max-w-xs">${project.sessions.map(s => `<option value="${s.id}" ${s.id === session.id ? 'selected' : ''}>${esc(s.title)}</option>`).join('')}</select><span class="text-xs text-slate-500">Conversation and actual model-input records are saved</span></div>
-    <div class="grid grid-cols-1 xl:grid-cols-12 min-h-[calc(100vh-110px)]"><section class="xl:col-span-8 border-r border-slate-200 min-w-0 flex flex-col">
-    <div id="chat-stream" class="px-4 md:px-6 py-6 flex flex-col gap-6 flex-1">
-    ${detail.messages.length ? detail.messages.map(messageHtml).join('') : `<div class="py-8 space-y-3"><h2 class="text-xl font-semibold">Start chatting to manage context automatically</h2><p class="text-sm text-slate-500">Context is registered from user messages and assistant responses, then selected by topic. Assistant proposals remain hypotheses.</p><div class="flex gap-2">${button('Connect a model', 'settings')}</div></div>`}
-    ${failed.map(r => `<div class="p-3 bg-rose-50 border border-rose-200 rounded-lg text-sm text-rose-800">Request failed: ${esc(r.ui_error || r.error)} ${button('View failed call', 'inspect', `data-run="${r.id}"`)}</div>`).join('')}
-    ${busy ? '<div id="processing-status" role="status" class="p-3 rounded-lg bg-indigo-50 text-indigo-700 text-sm">'+ esc(progressLabel()) + '</div>' : ''}</div>
-    <form id="chat-form" class="p-4 md:p-6 bg-white border-t border-slate-200 space-y-3">
-    <p class="text-xs text-slate-500">The agent identifies the conversation topic, finds relevant context, and uses it in the response.</p>
-    <textarea id="chat-input" aria-label="Message" maxlength="4000" rows="3" class="w-full rounded-lg border-slate-200 bg-slate-50 text-sm" placeholder="Type a message." ${busy ? 'disabled' : ''}>${esc(draft)}</textarea>
-    <div class="flex justify-between items-center text-xs text-slate-500"><span>${state.settings.provider === 'chatgpt' && state.auth.chatgptConnected ? 'Using ChatGPT plan · <a class="text-indigo-700 underline" href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener noreferrer">Manage usage</a><br>' : ''}⌘ / Ctrl + Enter to send · Enter for a new line <span id="char-count">${draft.length}/4000</span></span><button class="px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold" ${busy ? 'disabled' : ''}>Send</button></div></form></section>
-    <aside class="xl:col-span-4 p-4 md:p-6 space-y-5 bg-slate-50">${chatContextPanel()}</aside></div>`;
+  document.body.classList.add('chat-mode');
+  $('#view').innerHTML = `<section class="chat-layout">
+    <div id="chat-stream" class="chat-stream">
+      <div class="chat-messages ${detail.messages.length ? '' : 'chat-messages-empty'}">
+        ${detail.messages.length ? detail.messages.map(messageHtml).join('') : `<div class="chat-welcome"><div class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></div><h1>${loginRequired ? 'Connect a ChatGPT model' : 'Start a conversation'}</h1><p>${loginRequired ? 'Saved context and conversations can be managed without signing in. ChatGPT sign-in is only needed to generate live answers with a ChatGPT model.' : 'Relevant context is managed as the conversation develops, and each answer shows what was actually sent.'}</p>${!loginRequired && !currentChatModel() ? button('Choose a model', 'open-model-picker') : ''}</div>`}
+        ${failed.map(r => `<div class="chat-failure"><p>Request failed: ${esc(r.ui_error || r.error)}</p>${button('View failed call', 'inspect', `data-run="${r.id}"`)}</div>`).join('')}
+        ${busy ? '<div id="processing-status" role="status" class="chat-processing">'+ esc(progressLabel()) + '</div>' : ''}
+      </div>
+    </div>
+    <div class="chat-composer-dock">
+      <form id="chat-form" class="chat-composer">
+        <p id="chat-model-guidance" class="chat-model-guidance">${loginRequired ? 'ChatGPT sign-in is only needed for live model answers. Your saved context and conversations remain available.' : currentChatModel() ? 'The agent identifies the conversation topic, finds relevant context, and uses it in the response.' : 'Choose a model in the composer to start right away.'}</p>
+        <textarea id="chat-input" aria-label="Message" maxlength="4000" rows="1" class="chat-input" placeholder="${loginRequired ? 'Connect a ChatGPT model to send a message' : 'Send a message'}" ${busy || loginRequired ? 'disabled' : ''}>${esc(draft)}</textarea>
+        <div class="chat-composer-toolbar"><span class="chat-composer-hint">${state.settings.provider === 'chatgpt' && state.auth.chatgptConnected ? '<a href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener noreferrer">ChatGPT usage</a> · ' : ''}⌘ / Ctrl + Enter to send · Enter for a new line · <span id="char-count">${draft.length}/4000</span></span><div class="chat-composer-actions"><div id="model-picker" class="${loginRequired ? 'hidden' : ''}"></div><button type="submit" class="chat-send" aria-label="Send" title="Send" ${busy || loginRequired || !currentChatModel() ? 'disabled' : ''}><span class="material-symbols-outlined">arrow_upward</span></button></div></div>
+      </form>
+      <p class="chat-footer-note">Expand an answer to inspect the context sent and its source evidence.</p>
+    </div>
+  </section>
+  <button type="button" id="chat-context-backdrop" class="chat-context-backdrop ${contextPanelOpen ? 'is-open' : ''}" data-action="close-context-panel" aria-label="Close context panel" tabindex="-1"></button>
+  <aside id="chat-context-drawer" class="chat-context-drawer ${contextPanelOpen ? 'is-open' : ''}" role="complementary" aria-label="Context for this conversation" aria-hidden="${!contextPanelOpen}" ${contextPanelOpen ? '' : 'inert'}>${chatContextPanel()}</aside>`;
+  const stream = $('#chat-stream');
+  if (stream && detail.messages.length) stream.scrollTop = wasNearBottom ? stream.scrollHeight : previousTop;
+  renderModelPicker();
+  $('#context-panel-toggle')?.setAttribute('aria-expanded', String(contextPanelOpen));
+}
+function syncChatModelState() {
+  const guide = $('#chat-model-guidance');
+  if (guide) guide.textContent = chatNeedsLogin() ? 'ChatGPT sign-in is only needed for live model answers. Your saved context and conversations remain available.' : currentChatModel() ? 'The agent identifies the conversation topic, finds relevant context, and uses it in the response.' : 'Choose a model in the composer to start right away.';
+  const submit = $('#chat-form button[type="submit"]');
+  const busy = sending || (detail?.runs || []).some(run => run.status === 'running');
+  if (submit) submit.disabled = chatNeedsLogin() || !currentChatModel() || busy;
+  const input = $('#chat-input');
+  if (input) { input.disabled = chatNeedsLogin() || busy; input.placeholder = chatNeedsLogin() ? 'Connect a ChatGPT model to send a message' : 'Send a message'; }
 }
 function chatContextPanel() {
-  const selected = contextPreview.selected;
-  return `<div class="flex justify-between items-center gap-2"><h2 class="text-sm font-semibold">Context for this conversation</h2>${button('Manage', 'contexts')}</div><p class="text-xs text-slate-500">The agent selects topics and context for each question automatically. Below are saved materials for the latest answer topic.</p>
-    ${lastSelectionHtml()}${candidatePanel(true)}<section class="space-y-3"><div class="flex justify-between text-xs font-medium text-slate-600"><span>Saved context for the latest topic</span><span>${selected.length}</span></div>${selected.map(item => `<div class="rounded-lg border border-indigo-200 bg-white p-3 space-y-2"><div class="flex justify-between gap-2"><span class="text-sm font-semibold">${esc(item.title)}</span>${pill(kindLabel[item.kind], item.kind === 'hypothesis' ? 'amber' : 'slate')}</div><p class="context-snippet text-xs text-slate-600">${esc(item.content)}</p><p class="text-xs text-indigo-600">${esc(item.selection_reason)} · v${item.version}</p><div class="flex gap-2">${button('Exclude from this conversation', 'context-override', `data-context="${item.id}" data-mode="exclude"`)}${item.override !== 'auto' ? button('Reset to automatic', 'context-override', `data-context="${item.id}" data-mode="auto"`) : ''}</div></div>`).join('') || '<div class="rounded-lg border border-dashed border-slate-300 p-4 text-xs text-slate-500">Useful context is registered from the conversation and selected for subsequent questions.</div>'}</section>
-    <details class="text-xs text-slate-600"><summary>Excluded context ${contextPreview.excluded.length}</summary><div class="mt-3 space-y-3">${contextPreview.excluded.map(item => `<div class="rounded-lg border border-slate-200 bg-white p-3 space-y-2"><p class="font-semibold">${esc(item.title)}</p><p class="text-slate-500">${esc(item.selection_reason)}</p>${item.status === 'active' ? button('Include in this conversation', 'context-override', `data-context="${item.id}" data-mode="include"`) + (item.override !== 'auto' ? ' ' + button('Reset to automatic', 'context-override', `data-context="${item.id}" data-mode="auto"`) : '') : ''}</div>`).join('') || 'None'}</div></details>`;
+  const selected = contextPreview.selected || [];
+  const excluded = contextPreview.excluded || [];
+
+  const topicMap = new Map();
+  for (const item of selected) {
+    const ts = item.scope === 'project' ? ['Project-wide'] : item.topics?.length ? item.topics : ['Uncategorized topic'];
+    for (const t of ts) {
+      if (!topicMap.has(t)) topicMap.set(t, { topic: t, selected: [], excluded: [] });
+      topicMap.get(t).selected.push(item);
+    }
+  }
+  for (const item of excluded) {
+    const ts = item.scope === 'project' ? ['Project-wide'] : item.topics?.length ? item.topics : ['Uncategorized topic'];
+    for (const t of ts) {
+      if (!topicMap.has(t)) topicMap.set(t, { topic: t, selected: [], excluded: [] });
+      topicMap.get(t).excluded.push(item);
+    }
+  }
+
+  const groups = Array.from(topicMap.values());
+
+  return `<div class="flex justify-between items-center gap-2"><h2 class="text-sm font-semibold">Context for this conversation</h2>${button('Manage', 'contexts')}</div><p class="text-xs text-slate-500">This preview is based on topic scopes and conversation-specific overrides. Semantic selection runs for each question; the answer receipt shows what was actually sent.</p>
+    ${lastSelectionHtml()}${candidatePanel(true)}<section class="space-y-3"><div class="flex justify-between text-xs font-medium text-slate-600"><span>Topic and inclusion preview</span>${pill(countLabel(selected.length, 'Rule-based include', 'contexts included by rules', 'context included by rules'), 'green')}</div>
+    <div class="flex flex-wrap items-center gap-1.5 text-xs"><span class="text-slate-500">Latest answer topics:</span>${topics.length ? topics.map(topic => pill(`#${topic}`, 'indigo')).join('') : '<span class="text-slate-500">No topics have been identified yet.</span>'}</div>
+    ${groups.map(group => `
+      <div class="rounded-xl border ${group.selected.length ? 'border-indigo-200 bg-white' : 'border-slate-200 bg-slate-100/60'} p-3 space-y-2.5">
+        <div class="flex justify-between items-center gap-1">
+          <span class="text-xs font-bold ${group.selected.length ? 'text-indigo-900' : 'text-slate-600'}">${group.topic === 'Project-wide' ? esc(group.topic) : `#${esc(group.topic)}`}</span>
+          <div class="flex gap-1">${group.selected.length ? pill(countLabel(group.selected.length, 'Rule-based include', 'contexts included by rules', 'context included by rules'), 'green') : ''}${group.excluded.length ? pill(countLabel(group.excluded.length, 'Rule-based exclude', 'contexts excluded by rules', 'context excluded by rules')) : ''}</div>
+        </div>
+        ${group.selected.map(item => `
+          <div class="rounded-lg border border-indigo-100 bg-indigo-50/50 p-2.5 space-y-1.5 text-xs">
+            <div class="flex justify-between gap-1 items-center">
+              <span class="font-semibold text-slate-900">${esc(item.title)}</span>
+              ${pill(kindLabel[item.kind], item.kind === 'hypothesis' ? 'amber' : 'slate')}
+            </div>
+            <p class="context-snippet text-[11px] text-slate-600">${esc(item.content)}</p>
+            <p class="text-[11px] text-indigo-700">${esc(item.selection_reason)} · v${item.version}</p>
+            <div class="flex gap-2 pt-1">${button('Exclude from this conversation', 'context-override', `data-context="${item.id}" data-mode="exclude"`)}${item.override !== 'auto' ? button('Reset to automatic', 'context-override', `data-context="${item.id}" data-mode="auto"`) : ''}</div>
+          </div>
+        `).join('')}
+        ${group.excluded.length ? `
+          <details class="text-[11px] text-slate-500"><summary class="cursor-pointer hover:text-slate-700">Excluded context ${group.excluded.length}</summary>
+            <div class="mt-2 space-y-2">
+              ${group.excluded.map(item => `
+                <div class="rounded border border-slate-200 bg-white p-2 space-y-1 text-[11px]">
+                  <p class="font-medium text-slate-800">${esc(item.title)}</p>
+                  <p class="context-snippet text-slate-600">${esc(item.content)}</p>
+                  <p class="text-slate-500">${esc(item.selection_reason)}</p>
+                  ${item.source_id ? button('View source', 'source', `data-message="${esc(item.source_id)}"`) : ''}
+                  ${item.status === 'active' ? button('Include in this conversation', 'context-override', `data-context="${item.id}" data-mode="include"`) + (item.override !== 'auto' ? ' ' + button('Reset to automatic', 'context-override', `data-context="${item.id}" data-mode="auto"`) : '') : ''}
+                </div>
+              `).join('')}
+            </div>
+          </details>
+        ` : ''}
+      </div>
+    `).join('') || '<div class="rounded-lg border border-dashed border-slate-300 p-4 text-xs text-slate-500">Useful context is registered from the conversation and selected for subsequent questions.</div>'}
+    </section>`;
 }
 
 function visibleContexts() {
@@ -306,8 +581,10 @@ function snapshotCard(s) {
 }
 function compareControls(run) {
   const options = (value) => run.snapshots.map(s => `<option value="${run.id}|${s.id}" ${s.id === value ? 'selected' : ''}>${phaseLabel[s.phase]} · ${shortId(run.id)}</option>`).join('');
-  const left = compare?.left || run.snapshots.find(s => s.phase === 'generation')?.id || run.snapshots[0]?.id;
-  const right = compare?.right || run.snapshots.find(s => s.phase === 'correction')?.id || run.snapshots.find(s => s.phase === 'generation')?.id || run.snapshots.at(-1)?.id;
+  const selection = run.snapshots.find(s => s.phase === 'selection');
+  const generation = run.snapshots.find(s => s.phase === 'generation');
+  const left = compare?.left || selection?.id || generation?.id || run.snapshots[0]?.id;
+  const right = compare?.right || (generation?.id !== left ? generation?.id : run.snapshots.find(s => s.id !== left)?.id) || left;
   return `<div class="bg-white border border-slate-200 rounded-lg p-4 space-y-3"><p class="text-sm font-semibold">Select two calls to compare</p><div class="flex flex-wrap gap-2"><select id="compare-left" aria-label="Baseline call" class="text-xs rounded border-slate-200">${options(left)}</select><span>→</span><select id="compare-right" aria-label="Comparison call" class="text-xs rounded border-slate-200">${options(right)}</select>${button('Compare with the previous answer', 'compare-previous')}</div><p class="text-xs text-slate-500">Compare shared, added, removed, and changed blocks. Calls may have different input structures and purposes.</p></div>`;
 }
 async function loadComparison() {
@@ -320,11 +597,12 @@ async function loadComparison() {
 }
 function renderSettings() {
   const s = state.settings;
-  $('#view').innerHTML = `<div class="p-4 md:p-6 space-y-5"><div class="bg-white border border-slate-200 rounded-xl p-5"><h1 class="text-xl font-semibold">Settings</h1><p class="mt-3 text-sm text-slate-600">Conversations and actual model-input records are kept in server storage. Connecting a cloud model sends selected inputs to that provider. Validation and correction use additional calls.</p></div>${oauthCardHtml()}<div class="grid grid-cols-1 xl:grid-cols-2 gap-5"><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-4"><h2 class="font-semibold">Connect a model</h2>
-  <form id="settings-form" class="space-y-3"><label class="block text-sm">Connection type<select id="provider-input" class="block mt-1 w-full rounded border-slate-200 text-sm">${[['chatgpt', 'ChatGPT OAuth'], ['openai', 'OpenAI API key'], ['ollama', 'Local model · Ollama / Gemma'], ['demo', 'Demo · No model call']].filter(([id]) => !state.capabilities || state.capabilities.providers.includes(id)).map(([id, name]) => `<option value="${id}" ${s.provider === id ? 'selected' : ''}>${name}</option>`).join('')}</select></label><label id="manual-model-field" class="block text-sm ${s.provider === 'chatgpt' ? 'hidden' : ''}">Model ID<input id="model-input" class="block mt-1 w-full rounded border-slate-200 text-sm" value="${esc(s.model)}" list="model-choices" placeholder="Connect and load available models"><datalist id="model-choices">${(models.get(s.provider) || []).map(m => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('')}</datalist></label><label class="block text-sm ${state.mode === 'hosted' ? 'hidden' : ''}">Local model URL<input id="ollama-url" class="block mt-1 w-full rounded border-slate-200 text-sm" value="${esc(s.ollamaUrl)}"></label><label class="block text-sm">OpenAI API key <span class="text-xs text-slate-500">${state.auth.apiKeySet ? 'Saved · Leave blank to keep' : 'Not configured'}</span><input id="api-key" type="password" autocomplete="off" class="block mt-1 w-full rounded border-slate-200 text-sm" placeholder="Enter only to save a new key"></label><label class="flex gap-2 items-center text-sm"><input id="auto-context" type="checkbox" ${s.autoContext ? 'checked' : ''}>Automatically register and select conversation context</label><p class="text-xs text-slate-500">A connected model makes up to two additional calls for context selection and registration. Context is registered from user messages and assistant replies. Assistant suggestions are hypotheses. Context from the current question is applied immediately; context extracted from an answer is used in later answers.</p><div class="flex gap-2"><button class="bg-indigo-600 text-white rounded-lg px-4 py-2 text-sm">Save settings</button><span id="manual-model-check" class="${s.provider === 'chatgpt' ? 'hidden' : ''}">${button('Load models and check connection', 'models')}</span></div><p id="model-list-result" class="text-xs text-slate-500"></p></form><p class="text-xs text-slate-500">Credentials stay in server-only files and are excluded from call records and exports. API keys in the public demo are encrypted at rest.</p></section>
+  $('#view').innerHTML = `<div class="p-4 md:p-6 space-y-5"><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-4"><div><h1 class="text-xl font-semibold">Settings</h1><p class="mt-2 text-sm text-slate-600">Manage language and stored data.</p></div><label class="block max-w-sm rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">Interface language<select id="language-select" class="block mt-2 w-full rounded-lg border-slate-200 bg-white text-sm text-slate-800"><option value="en" ${LOCALE === 'en' ? 'selected' : ''}>English</option><option value="ko" ${LOCALE === 'ko' ? 'selected' : ''}>Korean</option></select></label><p class="text-xs text-slate-500">Records retained in server storage</p></section>${oauthCardHtml()}<div class="grid grid-cols-1 xl:grid-cols-2 gap-5"><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-4"><h2 class="font-semibold">Connection settings</h2>
+  <form id="settings-form" class="space-y-3"><label class="block text-sm">Connection type<select id="provider-input" class="block mt-1 w-full rounded border-slate-200 text-sm">${[['chatgpt', 'ChatGPT OAuth'], ['openai', 'OpenAI API key'], ['ollama', 'Local model · Ollama / Gemma'], ['demo', 'Demo · No model call']].filter(([id]) => !state.capabilities || state.capabilities.providers.includes(id)).map(([id, name]) => `<option value="${id}" ${s.provider === id ? 'selected' : ''}>${name}</option>`).join('')}</select></label><label id="ollama-field" class="block text-sm ${s.provider !== 'ollama' || state.mode === 'hosted' ? 'hidden' : ''}">Local model URL<input id="ollama-url" class="block mt-1 w-full rounded border-slate-200 text-sm" value="${esc(s.ollamaUrl)}"></label><label id="api-key-field" class="block text-sm ${s.provider !== 'openai' ? 'hidden' : ''}">OpenAI API key <span class="text-xs text-slate-500">${state.auth.apiKeySet ? 'Saved · Leave blank to keep' : 'Not configured'}</span><input id="api-key" type="password" autocomplete="off" class="block mt-1 w-full rounded border-slate-200 text-sm" placeholder="Enter only to save a new key"></label><p class="text-xs text-slate-500">Choose a model in each chat's composer.</p><label class="flex gap-2 items-center text-sm"><input id="auto-context" type="checkbox" ${s.autoContext ? 'checked' : ''}>Automatically register and select conversation context</label><p class="text-xs text-slate-500">A connected model makes up to two additional calls for context selection and registration. Context is registered from user messages and assistant replies. Assistant suggestions are hypotheses. Context from the current question is applied immediately; context extracted from an answer is used in later answers.</p><button class="bg-indigo-600 text-white rounded-lg px-4 py-2 text-sm">Save settings</button></form><p class="text-xs text-slate-500">Credentials stay in server-only files and are excluded from call records and exports. API keys in the public demo are encrypted at rest.</p></section>
   <div class="space-y-5"><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-3"><h2 class="font-semibold">Storage and export</h2><p class="text-sm text-slate-600">Storage ${(state.storage_bytes / 1024).toFixed(1)} KB · Projects ${state.projects.length}</p><div class="flex flex-wrap gap-2">${button('Download all records as JSON', 'export-json')}${button('Download SQLite database', 'export-sqlite')}</div><p class="text-xs text-slate-500">Includes original conversations; excludes credentials. Import and deletion are not available yet.</p></section><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-3"><h2 class="font-semibold">Validation policy</h2><p class="text-sm text-slate-600">At most one correction · One revalidation<br>Check source quotes before correction<br>Separate project scopes<br>Preserve inputs without overwriting</p><p class="text-xs text-slate-500">Insufficient evidence or invalid validation output is marked uncertain. Conflicts that remain after revalidation are marked unresolved.</p></section><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-3"><h2 class="font-semibold">Correction flow demo</h2><p class="text-sm text-slate-600">A separate demo project shows a draft that conflicts with conversation context, followed by source review, correction, and revalidation.</p>${button('Create a demo project', 'demo')}<p class="text-xs text-amber-800">The demo makes no model calls. It does not establish semantic validation accuracy in ordinary chats.</p></section></div></div></div>`;
 }
 async function sendMessage() {
+  if (chatNeedsLogin()) { toast('Log in to ChatGPT at the bottom left.'); return; }
   if (sending || detail.runs.some(r => r.status === 'running') || !draft.trim()) return;
   sending = true;
   try {
@@ -332,7 +610,7 @@ async function sendMessage() {
     draft = ''; selectedRun = response.run_id || selectedRun;
     sending = false;
     await refresh();
-    $('#chat-stream')?.lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    const stream = $('#chat-stream'); if (stream) stream.scrollTo({ top: stream.scrollHeight, behavior: 'smooth' });
   } catch (error) { sending = false; toast(error.message); render(); }
 }
 async function syncConnection() {
@@ -344,16 +622,21 @@ async function syncConnection() {
       location.reload(); return;
     }
     state = next;
-    if (previous !== state.auth.activeClientId) { models.delete('chatgpt'); chatgptModelsState = ''; }
+    if (previous !== state.auth.activeClientId) { models.delete('chatgpt'); modelErrors.delete('chatgpt'); }
     renderShell();
-    if (pageName === 'settings') { renderOAuthCard(); showPlanWelcome(); loadChatGPTModels().catch(error => toast(error.message)); }
+    if (pageName === 'settings') { renderOAuthCard(); showPlanWelcome(); }
+    if (pageName === 'chat') {
+      syncChatModelState();
+      if (!models.has(state.settings.provider)) loadModelsForProvider().catch(error => toast(error.message));
+    }
   })().finally(() => { syncTask = null; });
   return syncTask;
 }
 async function navigate(name) {
-  pageName = name; history.pushState(null, '', routePath(name));
+  pageName = name; if (name !== 'chat') contextPanelOpen = false; history.pushState(null, '', routePath(name));
   render(); await syncConnection();
-  if (pageName === 'settings') { showPlanWelcome(); await loadChatGPTModels(); }
+  if (pageName === 'settings') showPlanWelcome();
+  if (pageName === 'chat' && !models.has(state.settings.provider)) loadModelsForProvider().catch(error => toast(error.message));
 }
 async function source(messageId) {
   const message = await api(`/messages/${messageId}`);
@@ -375,7 +658,13 @@ async function download(path, filename) {
   a.href = url; a.download = filename; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 async function saveSettings() {
-  state = await api('/settings', 'POST', { provider: $('#provider-input').value, model: $('#provider-input').value === 'chatgpt' ? state.settings.provider === 'chatgpt' ? state.settings.model : '' : $('#model-input').value, ollamaUrl: $('#ollama-url').value, apiKey: $('#api-key').value, autoContext: $('#auto-context').checked });
+  const provider = $('#provider-input').value;
+  const previous = state.settings;
+  const model = provider === state.settings.provider ? state.settings.model : provider === 'chatgpt' ? state.settings.chatgptModels?.[state.auth.activeClientId] || '' : '';
+  const ollamaUrl = $('#ollama-url')?.value || state.settings.ollamaUrl;
+  const apiKey = $('#api-key')?.value || '';
+  state = await api('/settings', 'POST', { provider, model, ollamaUrl, apiKey, autoContext: $('#auto-context').checked });
+  if (previous.provider !== provider || previous.ollamaUrl !== ollamaUrl || apiKey) { models.delete(provider); modelErrors.delete(provider); }
   toast('Saved model settings.'); render();
 }
 
@@ -383,12 +672,6 @@ document.addEventListener('submit', async event => {
   event.preventDefault();
   try {
     if (event.target.id === 'chat-form') return await sendMessage();
-    if (event.target.id === 'oauth-model-form') {
-      const model = $('#oauth-model').value;
-      if (!model || (!(models.get('chatgpt') || []).some(m => m.id === model) && model !== state.settings.model)) throw new Error('Select a model available to this account.');
-      state = await api('/settings', 'POST', { ...state.settings, provider: 'chatgpt', model });
-      toast('Connected your ChatGPT account and selected model.'); return navigate('chat');
-    }
     if (event.target.id === 'settings-form') return await saveSettings();
     if (event.target.id === 'context-form') {
       const submit = event.target.querySelector('button:not([data-action])');
@@ -404,7 +687,7 @@ document.addEventListener('submit', async event => {
   } catch (error) { toast(error.message); }
 });
 document.addEventListener('input', event => {
-  if (event.target.id === 'chat-input') { draft = event.target.value; $('#char-count').textContent = `${draft.length}/4000`; }
+  if (event.target.id === 'chat-input') { draft = event.target.value; $('#char-count').textContent = `${draft.length}/4000`; event.target.style.height = 'auto'; event.target.style.height = `${Math.min(event.target.scrollHeight, 220)}px`; }
   if (event.target.id === 'context-search') { contextFilter = event.target.value; $('#context-list').innerHTML = contextListHtml(); }
   if (event.target.closest('#context-form') && editor) {
     if (event.target.name === 'topics') editor.topics = topicValues(event.target.value);
@@ -416,34 +699,74 @@ document.addEventListener('keydown', event => {
 });
 document.addEventListener('change', async event => {
   try {
+    if (event.target.id === 'language-select') {
+      const nextLocale = event.target.value;
+      if (nextLocale !== LOCALE && ['en', 'ko'].includes(nextLocale)) {
+        sessionStorage.setItem('contextpulse.languageDraft', JSON.stringify({ sessionId: session.id, projectId: project.project.id, draft, topics, contextTab, editor, selectedRun, inspectorMode }));
+        location.assign(routePath(pageName, nextLocale));
+      }
+      return;
+    }
     if (event.target.id === 'context-kind-filter') { contextKind = event.target.value; $('#context-list').innerHTML = contextListHtml(); }
     if (event.target.id === 'context-status-filter') { contextStatus = event.target.value; $('#context-list').innerHTML = contextListHtml(); }
-    if (event.target.id === 'session-select') { draft = ''; await loadProject(project.project.id, event.target.value); render(); }
     if (event.target.id === 'run-select') { selectedRun = event.target.value; compare = null; renderInspector(); }
     if (['compare-left', 'compare-right'].includes(event.target.id)) await loadComparison();
     if (event.target.id === 'provider-input') {
-      $('#manual-model-field').classList.toggle('hidden', event.target.value === 'chatgpt');
-      $('#manual-model-check').classList.toggle('hidden', event.target.value === 'chatgpt');
-      $('#model-input').value = event.target.value === 'demo' ? 'context-demo' : '';
-      $('#model-choices').innerHTML = (models.get(event.target.value) || []).map(m => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('');
+      $('#ollama-field').classList.toggle('hidden', event.target.value !== 'ollama' || state.mode === 'hosted');
+      $('#api-key-field').classList.toggle('hidden', event.target.value !== 'openai');
     }
   } catch (error) { toast(error.message); }
 });
 document.addEventListener('click', async event => {
-  if (event.target.closest('#language-switch')) {
-    event.preventDefault();
-    sessionStorage.setItem('contextpulse.languageDraft', JSON.stringify({ sessionId: session.id, projectId: project.project.id, draft, topics, contextTab, editor, selectedRun, inspectorMode }));
-    location.assign(routePath(pageName, LOCALE === 'ko' ? 'en' : 'ko')); return;
+  if (event.target.closest('#sidebar-toggle')) {
+    if ($('#app-sidebar').classList.contains('is-open')) closeSidebar(); else openSidebar();
+    return;
   }
+  if (event.target.closest('#sidebar-backdrop')) { closeSidebar(); return; }
   const brand = event.target.closest('#brand-link');
-  if (brand) { event.preventDefault(); return navigate('chat'); }
+  if (brand) { event.preventDefault(); closeSidebar(); return navigate('chat'); }
+  const conversation = event.target.closest('[data-session-id]');
+  if (conversation) {
+    const nextSessionId = conversation.dataset.sessionId;
+    closeSidebar();
+    if (nextSessionId !== session.id) {
+      draft = ''; compare = null;
+      await loadProject(project.project.id, nextSessionId);
+    }
+    return navigate('chat');
+  }
   const nav = event.target.closest('[data-page]');
-  if (nav) return navigate(nav.dataset.page);
+  if (nav) { closeSidebar(); return navigate(nav.dataset.page); }
   const target = event.target.closest('[data-action]');
   if (!target) return;
   try {
     const action = target.dataset.action;
+    if (action === 'toggle-context-panel' || action === 'close-context-panel') {
+      contextPanelOpen = action === 'toggle-context-panel' ? !contextPanelOpen : false;
+      $('#chat-context-backdrop')?.classList.toggle('is-open', contextPanelOpen);
+      $('#chat-context-drawer')?.classList.toggle('is-open', contextPanelOpen);
+      const drawer = $('#chat-context-drawer');
+      if (drawer) { drawer.setAttribute('aria-hidden', String(!contextPanelOpen)); drawer.inert = !contextPanelOpen; }
+      $('#context-panel-toggle')?.setAttribute('aria-expanded', String(contextPanelOpen));
+      if (contextPanelOpen) $('#chat-context-drawer')?.querySelector('button, [href], input, select, textarea')?.focus();
+      else $('#context-panel-toggle')?.focus();
+      return;
+    }
     if (['settings', 'contexts'].includes(action)) return navigate(action);
+    if (action === 'open-model-picker') {
+      const menu = $('#model-menu');
+      if (menu) { menu.open = true; menu.querySelector('summary')?.focus(); }
+      return;
+    }
+    if (action === 'model-select') {
+      const model = target.dataset.model;
+      if (!model || (!(models.get(state.settings.provider) || []).some(item => item.id === model) && model !== currentChatModel())) throw new Error('Choose from the available models.');
+      if (session.model_provider === state.settings.provider && model === session.model) { $('#model-menu').open = false; return; }
+      const result = await api(`/sessions/${session.id}/model`, 'POST', { model });
+      session = result.session; detail.session = session;
+      renderChat(); syncChatModelState(); toast('Model changed for this chat.'); return;
+    }
+    if (action === 'models-refresh') return await loadModelsForProvider(state.settings.provider, true);
     if (['context-materials', 'context-candidates'].includes(action)) { contextTab = action.split('-')[1]; return navigate('contexts'); }
     if (action === 'analyze-context') {
       target.disabled = true;
@@ -488,27 +811,13 @@ document.addEventListener('click', async event => {
     if (action === 'acknowledge-plan') {
       state = await api('/auth/acknowledge', 'POST', {}); $('#plan-welcome')?.remove(); return;
     }
-    if (action === 'oauth-models') return await loadChatGPTModels(true);
     if (action === 'choose-account') {
       state = await api('/auth/select', 'POST', { client_id: target.dataset.client });
-      models.delete('chatgpt'); chatgptModelsState = ''; render(); showPlanWelcome(); await loadChatGPTModels(); return;
+      models.delete('chatgpt'); modelErrors.delete('chatgpt'); render(); showPlanWelcome(); return;
     }
     if (action === 'disconnect') {
       target.disabled = true; state = await api('/auth/disconnect', 'POST', {});
-      models.delete('chatgpt'); oauthAttempt = { status: 'idle' }; render(); toast(state.disconnect.message); return;
-    }
-    if (action === 'models') {
-      target.disabled = true;
-      const provider = $('#provider-input').value;
-      if (provider === 'openai' && $('#api-key').value.trim()) {
-        state = await api('/settings', 'POST', { provider, model: $('#model-input').value, ollamaUrl: $('#ollama-url').value, apiKey: $('#api-key').value, autoContext: $('#auto-context').checked });
-        $('#api-key').value = '';
-      }
-      const result = await api('/models', 'POST', { provider, ollamaUrl: $('#ollama-url').value });
-      models.set(provider, result.models);
-      $('#model-choices').innerHTML = result.models.map(m => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('');
-      if (!$('#model-input').value && result.models.length) $('#model-input').value = result.models[0].id;
-      $('#model-list-result').textContent = `${result.models.length} models available. Select one and save settings.`; target.disabled = false; return;
+      models.delete('chatgpt'); modelErrors.delete('chatgpt'); oauthAttempt = { status: 'idle' }; render(); toast(state.disconnect.message); return;
     }
     if (action === 'export-json') return download('/export', 'contextpulse-backup.json');
     if (action === 'export-sqlite') return download('/export/sqlite', 'contextpulse.sqlite');
@@ -524,9 +833,21 @@ document.addEventListener('click', async event => {
 });
 $('#project-switch').addEventListener('click', projectDialog);
 $('#new-chat').addEventListener('click', async () => {
-  try { const next = await api('/sessions', 'POST', { project_id: project.project.id }); draft = ''; await loadProject(project.project.id, next.id); navigate('chat'); }
+  try { closeSidebar(); const next = await api('/sessions', 'POST', { project_id: project.project.id }); draft = ''; compare = null; await loadProject(project.project.id, next.id); navigate('chat'); }
   catch (error) { toast(error.message); }
 });
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') {
+    if (contextPanelOpen) {
+      contextPanelOpen = false;
+      $('#chat-context-backdrop')?.classList.remove('is-open'); $('#chat-context-drawer')?.classList.remove('is-open');
+      const drawer = $('#chat-context-drawer'); if (drawer) { drawer.setAttribute('aria-hidden', 'true'); drawer.inert = true; }
+      $('#context-panel-toggle')?.setAttribute('aria-expanded', 'false'); $('#context-panel-toggle')?.focus();
+    }
+    closeSidebar();
+  }
+});
+window.addEventListener('resize', () => { if (window.innerWidth > 850) closeSidebar(); else syncSidebarAccessibility(); });
 window.addEventListener('focus', () => { if (state && project) syncConnection().catch(error => toast(error.message)); });
 document.addEventListener('visibilitychange', () => { if (!document.hidden && state && project) syncConnection().catch(error => toast(error.message)); });
 window.addEventListener('hashchange', () => {
@@ -538,6 +859,7 @@ window.addEventListener('hashchange', () => {
 window.addEventListener('popstate', async () => { pageName = routeName(); await syncConnection(); render(); });
 
 async function init() {
+  syncSidebarAccessibility();
   state = await api('/state');
   const preferred = localStorage.getItem('contextpulse.project');
   await loadProject(state.projects.find(p => p.id === preferred)?.id || state.projects[0].id);
@@ -556,7 +878,8 @@ async function init() {
   if (['connected', 'permission_required'].includes(oauthAttempt.status)) sessionStorage.removeItem('contextpulse.oauthAttempt');
   const authMessage = new URLSearchParams(location.search).get('auth') || (location.hash.includes('?auth=') ? decodeURIComponent(location.hash.split('?auth=')[1]) : '');
   if (authMessage) { toast(authMessage); history.replaceState(null, '', routePath(pageName)); }
-  if (pageName === 'settings') { renderOAuthCard(); showPlanWelcome(); if (state.auth.chatgptConnected) loadChatGPTModels(); }
+  if (pageName === 'settings') { renderOAuthCard(); showPlanWelcome(); }
+  if (pageName === 'chat') loadModelsForProvider().catch(error => toast(error.message));
   if (['pending', 'processing'].includes(oauthAttempt.status)) watchOAuth();
 }
 init().catch(error => { $('#view').textContent = `Could not load the app: ${error.message}`; });

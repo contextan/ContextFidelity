@@ -104,7 +104,8 @@ test('identity-only login is retained but cannot make plan requests; consent ret
 test('refreshes rotate once per account and an in-flight request keeps its selected account', async t => {
   const { auth, connect, control, calls } = setup(t);
   await connect('account-a', 'a'); await connect('account-b', 'b', scope, 'subject-b');
-  const first = auth.value.accounts.find(a => a.client_id === 'account-a'); first.expires = 0;
+  const first = auth.value.accounts.find(a => a.client_id === 'account-a'); first.expires = 0; delete first.access_token;
+  assert.equal(auth.publicStatus().accounts.find(a => a.client_id === 'account-a').connected, true);
   control.tokens = { access_token: 'rotated-access-a', refresh_token: 'rotated-refresh-a', scope, expires_in: 3600 };
   const count = calls.filter(c => c.url.endsWith('/oauth/token')).length;
   assert.deepEqual(await Promise.all([auth.accessToken('account-a'), auth.accessToken('account-a')]), ['rotated-access-a', 'rotated-access-a']);
@@ -145,6 +146,20 @@ test('disconnect attempts session revocation, retains registration and reports u
   assert.equal(auth.value.accounts[0].access_token, undefined);
 });
 
+test('only disconnected account registrations can be removed from the saved list', async t => {
+  const { auth, connect } = setup(t);
+  await connect('account-a', 'a'); await connect('account-b', 'b', scope, 'subject-b');
+  const stale = auth.value.accounts.find(a => a.client_id === 'account-a');
+  delete stale.access_token; delete stale.refresh_token; delete stale.id_token;
+  auth.value.active = stale.client_id; auth.save();
+  assert.equal(auth.publicStatus().accounts.find(a => a.client_id === stale.client_id).canForget, true);
+  auth.forgetDisconnected(stale.client_id);
+  assert.equal(auth.value.accounts.some(a => a.client_id === stale.client_id), false);
+  assert.equal(auth.value.active, null);
+  assert.throws(() => auth.forgetDisconnected('account-b'), /토큰/);
+  assert.equal(auth.value.accounts.length, 1);
+});
+
 test('HTTP callback, status, account models, first-use acknowledgement, cancellation and canonical host work together', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'contextpulse-oauth-http-'));
   const port = 24500 + Math.floor(Math.random() * 300);
@@ -163,7 +178,7 @@ test('HTTP callback, status, account models, first-use acknowledgement, cancella
   const start = await api('/auth/start', {}), authorize = new URL(start.url); nonce = authorize.searchParams.get('nonce');
   assert.equal(start.attempt.status, 'pending');
   const result = await fetch(`${app.origin}/auth/callback?${new URLSearchParams({ state: authorize.searchParams.get('state'), client_id: 'issued-http-client', code: 'http-code' })}`, { headers: { Cookie: cookie }, redirect: 'manual' });
-  assert.equal(result.status, 303); assert.ok(result.headers.get('location').startsWith('/settings?auth='));
+  assert.equal(result.status, 303); assert.ok(result.headers.get('location').startsWith('/?auth='));
   assert.equal((await api('/auth/status')).attempt.status, 'connected');
   const connected = await api('/state'); assert.equal(connected.settings.provider, 'chatgpt'); assert.equal(connected.settings.model, '');
   assert.deepEqual((await api('/models', { provider: 'chatgpt' })).models, [{ id: 'eligible-model', name: '계정 모델' }]);
@@ -176,6 +191,10 @@ test('HTTP callback, status, account models, first-use acknowledgement, cancella
   assert.ok(returningCallback.headers.get('location').startsWith('/?auth='));
   assert.equal((await api('/state')).settings.model, 'eligible-model');
   await api('/auth/start', {}); assert.equal((await api('/auth/cancel', {})).attempt.status, 'cancelled');
+  await api('/auth/disconnect', {});
+  const stale = await api('/state'); assert.equal(stale.auth.accounts[0].canForget, true);
+  const cleaned = await api('/auth/forget', { client_id: 'issued-http-client' });
+  assert.equal(cleaned.auth.accounts.length, 0); assert.equal(cleaned.settings.model, '');
   const localhost = await fetch(`http://localhost:${port}/?v=oauth`, { redirect: 'manual' });
   assert.equal(localhost.status, 308); assert.equal(localhost.headers.get('location'), `${app.origin}/?v=oauth`);
 });
