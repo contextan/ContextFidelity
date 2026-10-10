@@ -85,6 +85,28 @@ test('captured message cannot return through automatic history after its context
   assert.equal(store.message(source.id).content, source.content);
   assert.ok(context.excluded.some(c => c.id === item.id));
 });
+test('deleting a context removes every version and prevents its source from returning to history or extraction', async t => {
+  const { store, session, project } = setup(t);
+  const source = store.addMessage(session.id, 'user', '삭제할 참고 원문은 인터뷰에서 나온 문제입니다.', ['제품']);
+  const first = store.saveContext(project.id, { title: '인터뷰 메모', content: '인터뷰에서 나온 문제', kind: 'reference', scope: 'topic', topics: ['제품'], include_mode: 'auto', source_id: source.id });
+  const latest = store.saveContext(project.id, { ...first, content: '인터뷰에서 확인한 문제', source_id: source.id }, first.id);
+  const question = store.addMessage(session.id, 'user', '인터뷰 문제를 요약해줘', ['제품']);
+  const run = await executeRun(store, null, session.id, question, { provider: 'demo', model: 'context-demo' });
+  const originalReceipt = store.run(run.id).snapshots[0].payload;
+  const result = store.deleteContext(latest.id);
+  assert.deepEqual(result.context_ids, [latest.id, first.id]);
+  assert.equal(store.context(first.id), null);
+  assert.equal(store.context(latest.id), null);
+  assert.throws(() => store.contextVersions(latest.id), /컨텍스트를 찾을 수 없습니다/);
+  assert.equal(store.message(source.id).content, source.content);
+  assert.equal(store.run(run.id).snapshots[0].payload, originalReceipt);
+  assert.equal(store.db.prepare('SELECT COUNT(*) count FROM context_search').get().count, 0);
+  const next = store.addMessage(session.id, 'user', '그 인터뷰 문제는 어땠지?', ['제품']);
+  const selected = selectContext(store, session.id, next);
+  assert.ok(!selected.blocks.some(block => block.key === `HISTORY:${source.id}`));
+  const nextRunId = store.createRun(session.id, next.id, { provider: 'demo', model: 'context-demo' });
+  assert.deepEqual(store.saveCandidates(nextRunId, [{ title: '재추출', content: source.content, kind: 'reference', scope: 'topic', topics: ['제품'], source_id: source.id }]), []);
+});
 test('context origin and per-chat overrides cannot cross project boundaries', t => {
   const { store, session, project, add } = setup(t);
   const item = add(), other = store.createProject('별도 프로젝트'), otherSession = store.sessions(other.id)[0];
@@ -124,4 +146,18 @@ test('HTTP context management feeds exact selected versions into requests and ex
   assert.equal(exported.tables.context_overrides.length, 1);
   await call(`/contexts/${v2.id}/archive`, { archived: true });
   assert.equal((await call(`/sessions/${session.id}/context-preview`, { topics: ['디자인'] })).selected.length, 0);
+  const remove = async path => {
+    const response = await fetch(`${app.origin}/api${path}`, { method: 'DELETE', headers: { 'X-ContextPulse-Token': state.csrf, 'Content-Type': 'application/json' }, body: '{}' });
+    const payload = await response.json();
+    assert.ok(response.ok, `${path}: ${response.status} ${JSON.stringify(payload)}`);
+    return payload;
+  };
+  const removedContext = await remove(`/contexts/${v2.id}`);
+  assert.deepEqual(removedContext.context_ids, [v2.id, v1.id]);
+  const registered = await call(`/sessions/${session.id}/messages`, { content: 'API에서 삭제할 사용자 기준', topics: [], decision: { scope: 'project' } });
+  const removedDecision = await remove(`/decisions/${registered.decision.id}`);
+  assert.deepEqual(removedDecision.decision_ids, [registered.decision.id]);
+  const removedSession = await remove(`/sessions/${session.id}`);
+  assert.ok(removedSession.replacement_session.id);
+  assert.equal((await call(`/projects/${project.project.id}`)).sessions.length, 1);
 });
