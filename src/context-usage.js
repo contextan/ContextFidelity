@@ -2,6 +2,11 @@ import { systemText } from './localization.js';
 
 function localizedSelectionReason(reason, locale, included) {
   if (typeof reason !== 'string' || locale !== 'en' || !/[가-힣]/u.test(reason)) return reason;
+  const score = reason.match(/^SQLite FTS5 (?:키워드·주제 )?점수 (\d+)% · 기준 (\d+)% (이상|미달 또는 상위 후보 제한)$/u);
+  if (score) return included
+    ? `SQLite FTS5 keyword/topic score ${score[1]}% · threshold ${score[2]}%`
+    : `SQLite FTS5 keyword/topic score ${score[1]}% · below threshold ${score[2]}% or outside the candidate limit`;
+  if (reason.startsWith('SQLite FTS5 키워드 일치 없음')) return 'No SQLite FTS5 keyword match above the threshold';
   // Older receipts may contain a Korean selector explanation. Preserve the
   // frozen request, but show a truthful localized summary in the English UI.
   return systemText(included ? '질문 의미로 자동 선택' : '질문 의미로 자동 제외', locale);
@@ -16,6 +21,7 @@ export function contextUsage(run, locale = 'ko') {
   const parse = block => { try { return JSON.parse(block?.content || '{}'); } catch { return {}; } };
   const scope = parse(input.blocks.find(block => block.key === 'PROJECT_SCOPE'));
   const selection = parse(input.blocks.find(block => block.key === 'CONTEXT_SELECTION'));
+  const retrievalScores = new Map((selection.search?.scores || selection.search?.candidates || []).map(item => [item.context_id, item]));
   const rawExcluded = Array.isArray(input.excluded)
     ? input.excluded
     : (() => { try { return JSON.parse(input.excluded || '[]'); } catch { return []; } })();
@@ -31,6 +37,7 @@ export function contextUsage(run, locale = 'ko') {
       scope: block.scope || value.scope,
       topics: block.topics || value.topics || [],
       override: block.override || 'auto',
+      retrieval: retrievalScores.get(block.context_id) || null,
       injected: true,
       entry_type: 'context',
     };
@@ -45,6 +52,13 @@ export function contextUsage(run, locale = 'ko') {
     injected: true,
     entry_type: 'conversation',
   }));
+  const injectedHistory = input.blocks.filter(block => block.key.startsWith('HISTORY:')).map(block => ({
+    ...parse(block),
+    source_id: block.source_id,
+    topics: block.topics || [],
+    injected: true,
+    entry_type: 'history',
+  }));
   const excludedContexts = rawExcluded.filter(item => item.type === 'context').map(item => ({
     id: item.id,
     root_id: item.root_id,
@@ -58,6 +72,7 @@ export function contextUsage(run, locale = 'ko') {
     include_mode: item.include_mode || 'auto',
     topics: item.topics || [],
     version: item.version,
+    retrieval: retrievalScores.get(item.id) || null,
     selection_reason: localizedSelectionReason(item.reason, locale, false),
     injected: false,
     entry_type: 'context',
@@ -73,6 +88,16 @@ export function contextUsage(run, locale = 'ko') {
     selection_reason: systemText(item.reason, locale),
     injected: false,
     entry_type: 'conversation',
+  }));
+  const excludedHistory = rawExcluded.filter(item => item.type === 'message').map(item => ({
+    id: item.id,
+    source_id: item.source_id || item.id,
+    role: item.role,
+    content: item.content,
+    topics: item.topics || [],
+    selection_reason: systemText(item.reason, locale),
+    injected: false,
+    entry_type: 'history',
   }));
 
   const questionTopics = Array.isArray(scope.topics) ? scope.topics : [];
@@ -99,8 +124,10 @@ export function contextUsage(run, locale = 'ko') {
 
   addToGroups(injectedContexts, 'injected_items');
   addToGroups(injectedDecisions, 'injected_items');
+  addToGroups(injectedHistory, 'injected_items');
   addToGroups(excludedContexts, 'excluded_items');
   addToGroups(excludedDecisions, 'excluded_items');
+  addToGroups(excludedHistory, 'excluded_items');
 
   const topicClusters = [...groups.values()].map(group => {
     const questionMatched = group.scope !== 'project' && questionTopics.includes(group.topic);
@@ -130,14 +157,16 @@ export function contextUsage(run, locale = 'ko') {
       return question ? { content: question.content, source_id: question.source_id } : null;
     })(),
     captured_at: input.created_at,
-    selection_mode: selection.mode === 'semantic' ? 'semantic' : 'tags',
+    selection_mode: selection.mode === 'fts5' ? 'fts5' : selection.mode === 'semantic' ? 'semantic' : 'tags',
+    search: selection.search || null,
     selection_warning: selection.warning || null,
     topic_clusters: topicClusters,
     contexts: injectedContexts,
     decisions: injectedDecisions,
     excluded_contexts: excludedContexts,
     excluded_decisions: excludedDecisions,
-    history: input.blocks.filter(block => block.key.startsWith('HISTORY:')).map(block => ({ ...parse(block), source_id: block.source_id })),
+    excluded_history: excludedHistory,
+    history: injectedHistory,
     correction_evidence: input.blocks.filter(block => block.key.startsWith('ORIGINAL:')).map(block => ({ ...parse(block), source_id: block.source_id })),
   };
 }

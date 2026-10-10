@@ -40,6 +40,76 @@ test('mandatory decisions survive topic selection; superseded evidence never ent
   assert.ok(!JSON.stringify(context.blocks).includes('디자인 구 기준'));
   assert.equal(context.evidence[0].source_id, mandatory.source_id);
 });
+test('decisions can be archived and restored without rewriting their source', t => {
+  const { store, session } = fixture(t);
+  const old = store.register(session.id, '이전 기준', []).decision;
+  const current = store.register(session.id, '현재 기준', [], { supersedes: old.id }).decision;
+  assert.equal(store.archiveDecision(current.id, true).status, 'archived');
+  assert.throws(() => store.archiveDecision(old.id, false), /현재 결정/);
+  assert.equal(store.archiveDecision(current.id, false).status, 'active');
+  assert.equal(store.message(current.source_id).content, '현재 기준');
+});
+test('deleting a decision removes its full version chain and suppresses its source from future context', t => {
+  const { store, session } = fixture(t);
+  const first = store.register(session.id, '먼저 세 가지 기준으로 평가한다.', ['평가']).decision;
+  const latest = store.register(session.id, '이제 두 가지 기준으로 평가한다.', ['평가'], { supersedes: first.id }).decision;
+  const result = store.deleteDecision(latest.id);
+  assert.deepEqual(result.decision_ids, [latest.id, first.id]);
+  assert.deepEqual(store.decisions(store.session(session.id).project_id), []);
+  assert.equal(store.message(first.source_id).content, '먼저 세 가지 기준으로 평가한다.');
+  assert.equal(store.message(latest.source_id).content, '이제 두 가지 기준으로 평가한다.');
+  const question = store.addMessage(session.id, 'user', '이 기준으로 평가해줘.', ['평가']);
+  const selection = selectContext(store, session.id, question);
+  assert.equal(selection.active.length, 0);
+  assert.ok(!selection.blocks.some(block => block.key === `HISTORY:${latest.source_id}` || block.key === `HISTORY:${first.source_id}`));
+  const runId = store.createRun(session.id, question.id, { provider: 'demo', model: 'context-demo' });
+  assert.deepEqual(store.saveCandidates(runId, [{ title: '재추출', content: '먼저 세 가지 기준으로 평가한다.', kind: 'decision', scope: 'topic', topics: ['평가'], source_id: first.source_id }]), []);
+});
+test('deleting a conversation clears its messages, receipts and derived context while preserving the project', async t => {
+  const { store, project, session } = fixture(t);
+  const other = store.createSession(project.id);
+  const source = store.addMessage(session.id, 'user', '이 대화에서 나온 참고 내용입니다.', ['제품']);
+  const context = store.saveContext(project.id, { title: '대화 참고', content: source.content, kind: 'reference', scope: 'topic', topics: ['제품'], include_mode: 'auto', source_id: source.id });
+  const decision = store.register(session.id, '이 대화의 기준은 사용성 우선이다.', ['제품']).decision;
+  const question = store.addMessage(session.id, 'user', '시연 질문', ['제품']);
+  const run = await executeRun(store, null, session.id, question, { provider: 'demo', model: 'context-demo' });
+  const unrelated = store.saveContext(project.id, { title: '공유 배경', content: '다른 대화와 무관한 수동 배경', kind: 'background', scope: 'project', topics: [], include_mode: 'auto' });
+  const result = store.deleteSession(session.id, 'ko');
+  assert.equal(result.project_id, project.id);
+  assert.equal(result.replacement_session.id, other.id);
+  assert.equal(store.session(session.id), undefined);
+  assert.equal(store.message(source.id), null);
+  assert.equal(store.run(run.id), null);
+  assert.equal(store.context(context.id), null);
+  assert.equal(store.decision(decision.id), null);
+  assert.equal(store.context(unrelated.id).content, unrelated.content);
+  assert.deepEqual(store.sessions(project.id).map(item => item.id), [other.id]);
+  const last = store.deleteSession(other.id, 'ko');
+  assert.ok(last.replacement_session.id);
+  assert.equal(store.sessions(project.id).length, 1);
+  assert.equal(store.db.prepare('PRAGMA foreign_key_check').all().length, 0);
+});
+test('clear all data removes conversations, contexts, decisions, and immutable call snapshots while preserving settings', t => {
+  const { store, project, session } = fixture(t);
+  store.saveSettings({ provider: 'chatgpt', model: 'gpt-6.1-sol', autoContext: true });
+  const source = store.addMessage(session.id, 'user', '프로젝트 기준은 검증 가능성이다.', ['프로젝트']);
+  store.register(session.id, source.content, ['프로젝트'], { scope: 'topic' });
+  store.saveContext(project.id, { title: '참고', content: '보존하지 않을 자료', kind: 'reference', scope: 'topic', topics: ['프로젝트'], include_mode: 'auto' });
+  const runId = store.createRun(session.id, source.id, { provider: 'chatgpt', model: 'gpt-6.1-sol' });
+  store.snapshot(runId, 'generation', { provider: 'chatgpt', model: 'gpt-6.1-sol', endpoint: 'test', payload: { input: source.content } }, [], []);
+  const fresh = store.clearAllData('ko');
+  assert.notEqual(fresh.id, project.id);
+  assert.equal(store.settings().model, 'gpt-6.1-sol');
+  assert.deepEqual(store.projects().map(item => item.id), [fresh.id]);
+  assert.equal(store.sessions(fresh.id).length, 1);
+  for (const table of ['messages', 'decisions', 'contexts', 'context_suppressions', 'context_candidates', 'runs', 'snapshots', 'call_results']) {
+    assert.equal(store.db.prepare(`SELECT COUNT(*) count FROM ${table}`).get().count, 0, table);
+  }
+  const nextSource = store.addMessage(store.sessions(fresh.id)[0].id, 'user', '새 데이터', []);
+  const nextRun = store.createRun(store.sessions(fresh.id)[0].id, nextSource.id, { provider: 'chatgpt', model: 'gpt-6.1-sol' });
+  const nextSnapshot = store.snapshot(nextRun, 'generation', { provider: 'chatgpt', model: 'gpt-6.1-sol', endpoint: 'test', payload: {} }, [], []);
+  assert.throws(() => store.db.prepare('DELETE FROM snapshots WHERE id=?').run(nextSnapshot.id), /immutable/);
+});
 test('explicit demo preserves 4 calls and frozen context after a later decision revision', async t => {
   const { store, session } = fixture(t);
   const old = store.register(session.id, 'Solana 필수성 입증이 없으면 감점한다.', ['평가']).decision;
@@ -154,6 +224,13 @@ test('HTTP isolation, persistence and authentic SQLite export', async t => {
   assert.ok(db.length > 1000);
   const persisted = app.store.path;
   assert.ok(readFileSync(persisted).length > 1000);
+  const beforeClear = app.store.projects()[0].id;
+  const cleared = await fetch(`${app.origin}/api/data`, { method: 'DELETE', headers, body: '{}' });
+  const clean = await cleared.json();
+  assert.equal(cleared.status, 200);
+  assert.notEqual(clean.project.id, beforeClear);
+  assert.equal(app.store.db.prepare('SELECT COUNT(*) count FROM snapshots').get().count, 0);
+  assert.equal((await fetch(`${app.origin}/api/projects/${beforeClear}`, { headers })).status, 404);
 });
 
 test('process restart restores original messages and marks interrupted requests failed', t => {

@@ -1,4 +1,4 @@
-const CLIENT_BUILD_ID = '20ec66620712';
+const CLIENT_BUILD_ID = '2eb43b8c021c';
 const LOCALE = /^\/ko(?:\/|$)/.test(location.pathname) ? 'ko' : 'en';
 const DATE_LOCALE = LOCALE === 'ko' ? 'ko-KR' : 'en-US';
 const PAGE_ROUTES = { chat: '', contexts: 'contexts', settings: 'settings', inspector: 'records' };
@@ -8,11 +8,11 @@ function routeName() {
 }
 const $ = (selector) => document.querySelector(selector);
 const esc = (value = '') => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const phaseLabel = { selection: 'Select context for the question', extraction: 'Automatic conversation context registration', generation: 'Generate draft', validation: 'Validate', correction: 'Correct', revalidation: 'Revalidate' };
-const statusLabel = { extracted: 'Automatic registration complete', running: 'Processing', corrected: 'Conflict corrected', consistent: 'Validation passed', uncertain: 'Uncertain', unresolved: 'Conflict unresolved', failed: 'Failed', no_decisions: 'No relevant context found' };
+const phaseLabel = { selection: 'Select context for the question', extraction: 'Automatic conversation context registration', generation: 'Generate draft', validation: 'Validate', correction: 'Correct', format_correction: 'Answer format correction', revalidation: 'Revalidate' };
+const statusLabel = { extracted: 'Automatic registration complete', running: 'Processing', corrected: 'Conflict corrected', consistent: 'Validation passed', uncertain: 'Uncertain', unresolved: 'Conflict unresolved', failed: 'Failed', no_decisions: 'No active decision to verify' };
 let state, project, session, detail, selectedRun = null, compare = null;
 let pageName = routeName();
-let topics = [], draft = '', sending = false, poll = null, toastTimer;
+let topics = [], draft = '', sending = false, poll = null, toastTimer, chatStickToBottom = true;
 let contextPanelOpen = false;
 let inspectorMode = 'columns';
 const models = new Map();
@@ -22,6 +22,19 @@ const modelErrors = new Map();
 const kindLabel = { background: 'Background', reference: 'Reference', hypothesis: 'Hypothesis' };
 const includeLabel = { auto: 'Select automatically', always: 'Always include in this project', off: 'Exclude by default' };
 let contextPreview = { selected: [], excluded: [] }, contextTab = 'materials', contextFilter = '', contextStatus = 'active', contextKind = 'all', editor = null, previewSequence = 0;
+
+function hasRunWork(runs = []) {
+  return runs.some(run => run.status === 'running' || run.validation?.context_registration?.status === 'running');
+}
+function registrationLabel(run) {
+  const status = run.validation?.context_registration?.status;
+  return ({ running: 'Registering context in the background', completed: 'Context registration complete', failed: 'Context registration failed', interrupted: 'Context registration interrupted' })[status] || '';
+}
+function registrationPill(run) {
+  const status = run.validation?.context_registration?.status;
+  const label = registrationLabel(run);
+  return label ? pill(label, status === 'completed' ? 'green' : status === 'failed' || status === 'interrupted' ? 'red' : 'amber') : '';
+}
 
 async function api(path, method = 'GET', data) {
   const request = () => fetch(`/api${path}`, { method, headers: { 'Content-Type': 'application/json', 'X-ContextPulse-Locale': LOCALE, ...(state?.csrf ? { 'X-ContextPulse-Token': state.csrf } : {}) }, ...(data !== undefined ? { body: JSON.stringify(data) } : {}) });
@@ -74,9 +87,11 @@ function showPlanWelcome() {
   if (!state.auth.accounts.some(a => a.active && a.connected && a.welcomePending) || $('#plan-welcome')) return;
   const dialog = document.createElement('dialog'); dialog.id = 'plan-welcome';
   dialog.className = 'rounded-xl border border-slate-200 shadow-xl p-6 max-w-lg w-[90vw]';
-  dialog.innerHTML = `<h2 class="text-lg font-semibold">You are using your ChatGPT plan</h2><p class="text-sm text-slate-600 mt-3">Eligible model requests in this app use your connected ChatGPT plan. Context selection, extraction, validation, and correction also use additional requests.</p><a class="block mt-3 text-sm text-indigo-700 underline" href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener noreferrer">Manage ChatGPT usage</a><div class="mt-5">${button('Got it', 'acknowledge-plan')}</div>`;
+  dialog.setAttribute('aria-labelledby', 'plan-welcome-title');
+  dialog.setAttribute('aria-describedby', 'plan-welcome-description');
+  dialog.innerHTML = `<h2 id="plan-welcome-title" class="text-lg font-semibold">You are using your ChatGPT plan</h2><p id="plan-welcome-description" class="text-sm text-slate-600 mt-3">Eligible model requests in this app use your connected ChatGPT plan. Context selection, extraction, validation, and correction also use additional requests.</p><a class="block mt-3 text-sm text-indigo-700 underline" href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener noreferrer">Manage ChatGPT usage</a><div class="mt-5">${button('Got it', 'acknowledge-plan')}</div>`;
   dialog.addEventListener('cancel', event => { event.preventDefault(); dialog.querySelector('button').click(); });
-  document.body.append(dialog); dialog.showModal();
+  document.body.append(dialog); dialog.showModal(); dialog.querySelector('[data-action="acknowledge-plan"]').focus({ preventScroll: true });
 }
 async function oauthCompleted() {
   clearTimeout(oauthTimer); oauthTimer = null; oauthUrl = '';
@@ -138,7 +153,27 @@ function modelPickerHtml() {
     : !connected ? `<p class="px-3 py-3 text-xs text-slate-500">Connect a ChatGPT account.</p>`
       : modelErrors.has(provider) ? `<p class="px-3 py-3 text-xs text-rose-700" role="status">${esc(modelErrors.get(provider))}</p>`
         : !available.length ? '<p class="px-3 py-3 text-xs text-slate-500">No models are available.</p>' : '';
-  return `<details id="model-menu" class="relative"><summary aria-label="Choose a model: ${esc(label)}" class="list-none cursor-pointer flex max-w-[180px] items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"><span class="material-symbols-outlined text-indigo-600 text-[18px]">auto_awesome</span><span class="truncate">${esc(label)}</span><span class="material-symbols-outlined text-slate-400 text-[18px]">expand_more</span></summary><div role="menu" aria-label="Choose a model" class="absolute right-0 bottom-full z-[60] mb-2 w-72 max-w-[calc(100vw-24px)] rounded-xl border border-slate-200 bg-white p-2 shadow-xl"><p class="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Available models</p>${options || emptyState}<div class="mt-2 border-t border-slate-100 pt-2">${button('Refresh', 'models-refresh', loading || busy ? 'disabled' : '')}</div></div></details>`;
+  return `<details id="model-menu" class="relative"><summary aria-label="Choose a model: ${esc(label)}" class="list-none cursor-pointer flex max-w-[32vw] sm:max-w-[180px] items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"><span class="material-symbols-outlined text-indigo-600 text-[18px]">auto_awesome</span><span class="truncate">${esc(label)}</span><span class="material-symbols-outlined text-slate-400 text-[18px]">expand_more</span></summary><div role="menu" aria-label="Choose a model" class="absolute right-0 bottom-full z-[60] mb-2 w-72 max-w-[calc(100vw-24px)] rounded-xl border border-slate-200 bg-white p-2 shadow-xl"><p class="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Available models</p>${options || emptyState}<div class="mt-2 border-t border-slate-100 pt-2">${button('Refresh', 'models-refresh', loading || busy ? 'disabled' : '')}</div></div></details>`;
+}
+function reasoningEffortsFor(model) {
+  const metadata = (models.get(state.settings.provider) || []).find(item => item.id === model);
+  const advertised = metadata?.reasoning_efforts;
+  if (Array.isArray(advertised)) return advertised.filter(value => ['low', 'medium', 'high', 'xhigh'].includes(value));
+  const id = String(model || '').toLowerCase();
+  if (/^gpt-6(?:[.-]|$)/.test(id)) return ['low', 'medium', 'high', 'xhigh'];
+  if (/^gpt-5-pro(?:$|-)/.test(id)) return ['high'];
+  if (/^gpt-5\.1-codex-max(?:$|-)/.test(id)) return ['low', 'medium', 'high', 'xhigh'];
+  if (/^gpt-5\.1(?:$|-)/.test(id)) return ['low', 'medium', 'high'];
+  if (/^gpt-5(?:$|[.-])/.test(id) || /^o[1-9](?:$|[.-])/.test(id)) return ['low', 'medium', 'high'];
+  return [];
+}
+function reasoningPickerHtml(busy = false) {
+  const efforts = reasoningEffortsFor(currentChatModel());
+  if (!efforts.length) return '';
+  const requested = session?.reasoning_effort || 'high';
+  const selected = requested === 'auto' || efforts.includes(requested) ? requested : efforts.includes('high') ? 'high' : efforts[0];
+  const labels = { auto: 'Auto', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high' };
+  return `<label class="chat-reasoning-control"><span>Reasoning</span><select id="reasoning-effort" aria-label="Reasoning" title="Reasoning" ${busy ? 'disabled' : ''}>${['auto', ...efforts].map(value => `<option value="${value}" ${selected === value ? 'selected' : ''}>${labels[value]}</option>`).join('')}</select></label>`;
 }
 
 async function loadProject(projectId, sessionId) {
@@ -154,6 +189,7 @@ async function loadProject(projectId, sessionId) {
   if (session.id !== previousSession) {
     topics = detail.runs.find(r => r.context_usage)?.context_usage.topics || [];
     editor = null;
+    chatStickToBottom = true;
   }
   localStorage.setItem(`contextpulse.session.${projectId}`, session.id);
   if (!detail.runs.some(r => r.id === selectedRun)) selectedRun = detail.runs[0]?.id || null;
@@ -173,24 +209,27 @@ async function refresh() {
 }
 function startPolling() {
   clearInterval(poll);
-  if (!detail.runs.some(r => r.status === 'running')) return;
+  if (!hasRunWork(detail.runs)) return;
   const watching = session.id;
   poll = setInterval(async () => {
     try {
       const next = await api(`/sessions/${watching}`);
       if (session.id !== watching) return;
+      const previous = detail.runs;
+      const hadAssistantMessage = previous.some(run => run.assistant_message_id);
+      const previousRegistration = new Map(previous.map(run => [run.id, run.validation?.context_registration?.status]));
       detail = next;
-      if (!next.runs.some(r => r.status === 'running')) {
+      const registrationChanged = next.runs.some(run => previousRegistration.get(run.id) !== run.validation?.context_registration?.status);
+      if (!hasRunWork(next.runs)) {
         clearInterval(poll); poll = null; sending = false;
         state = await api('/state'); project = await api(`/projects/${project.project.id}`);
-        render();
-        const last = next.runs[0];
         await loadContextPreview(); render();
-        toast(last.status === 'failed' ? last.ui_error || last.error : last.purpose === 'analysis' ? last.validation?.note : last.ui_warning || last.validation?.context_warning || 'Saved the answer and context for each call.');
+        const last = next.runs.find(run => run.id === selectedRun) || next.runs[0];
+        toast(last?.status === 'failed' ? last.ui_error || last.error : last?.purpose === 'analysis' ? last.validation?.note : last?.validation?.context_registration?.status === 'failed' ? last.ui_registration_error || last.validation.context_registration.error : last?.ui_warning || last?.validation?.context_warning || 'Saved the answer and context for each call.');
       } else {
         const badge = $('#processing-status');
         if (badge) badge.textContent = progressLabel();
-        if (next.runs.some(r => r.assistant_message_id)) render();
+        if ((!hadAssistantMessage && next.runs.some(run => run.assistant_message_id)) || registrationChanged) render();
       }
     } catch (error) { clearInterval(poll); poll = null; sending = false; toast(error.message); }
   }, 1000);
@@ -202,7 +241,7 @@ function renderSessionList() {
     const untitled = ['\uc0c8 \ub300\ud654', 'New conversation'].includes(item.title);
     const title = untitled ? 'New conversation' : item.title;
     const current = item.id === session.id;
-    return `<button type="button" data-session-id="${esc(item.id)}" aria-current="${current ? 'page' : 'false'}" title="${esc(title)}" class="sidebar-session"><span class="material-symbols-outlined">chat_bubble_outline</span><span class="sidebar-session-title">${esc(title)}</span></button>`;
+    return `<div class="sidebar-session-row"><button type="button" data-session-id="${esc(item.id)}" aria-current="${current ? 'page' : 'false'}" title="${esc(title)}" class="sidebar-session"><span class="material-symbols-outlined">chat_bubble_outline</span><span class="sidebar-session-title">${esc(title)}</span></button><button type="button" data-action="delete-session" data-session="${esc(item.id)}" aria-label="Delete chat: ${esc(title)}" title="Delete chat" class="sidebar-session-delete"><span class="material-symbols-outlined" aria-hidden="true">delete_outline</span></button></div>`;
   }).join('') : '<p class="sidebar-empty">No conversations yet.</p>';
 }
 function chatNeedsLogin() {
@@ -256,7 +295,7 @@ function renderShell() {
     delete settingsTab.dataset.consent;
     settingsTab.disabled = false;
     settingsTab.setAttribute('aria-label', 'ChatGPT sign-in information');
-    settingsTab.title = 'ChatGPT sign-in information';
+    settingsTab.removeAttribute('title');
     settingsTab.classList.remove('sidebar-login-tab');
     settingsTab.classList.add('sidebar-settings-tab');
     settingsTab.innerHTML = '<span class="material-symbols-outlined">info</span><span>ChatGPT sign-in information</span>';
@@ -273,7 +312,7 @@ function renderShell() {
     }
     settingsTab.disabled = false;
     settingsTab.setAttribute('aria-label', pendingLogin ? 'Continue sign-in' : state.auth.signedIn ? 'Approve plan access' : 'Log in with ChatGPT');
-    settingsTab.title = pendingLogin ? 'Continue sign-in' : state.auth.signedIn ? 'Approve plan access' : 'Log in with ChatGPT';
+    settingsTab.removeAttribute('title');
     settingsTab.classList.remove('sidebar-settings-tab');
     settingsTab.classList.add('sidebar-login-tab');
     settingsTab.innerHTML = `<span class="material-symbols-outlined">${pendingLogin ? 'open_in_new' : 'login'}</span><span>${pendingLogin ? 'Continue sign-in' : state.auth.signedIn ? 'Approve plan access' : 'Log in with ChatGPT'}</span>`;
@@ -284,7 +323,7 @@ function renderShell() {
     delete settingsTab.dataset.consent;
     settingsTab.disabled = false;
     settingsTab.setAttribute('aria-label', 'Settings');
-    settingsTab.title = 'Settings';
+    settingsTab.removeAttribute('title');
     settingsTab.classList.remove('sidebar-login-tab');
     settingsTab.classList.add('sidebar-settings-tab');
     settingsTab.innerHTML = '<span class="material-symbols-outlined">tune</span><span>Settings</span>';
@@ -315,8 +354,9 @@ function messageHtml(message) {
     <div class="chat-message-content">
       <div class="chat-message-heading"><span class="${ai ? 'chat-assistant-name' : 'chat-user-name'}">${ai ? 'ContextPulse' : 'You'}</span></div>
       <div class="chat-message-bubble ${ai ? 'chat-assistant-bubble' : 'chat-user-bubble'}"><div class="message-body">${esc(message.content)}</div></div>
-      ${run ? `<div class="chat-run-meta">${pill(run.status === 'running' && run.assistant_message_id ? 'Answer checked · registering context' : statusLabel[run.status], run.status === 'corrected' || run.status === 'consistent' ? 'green' : 'amber')}${run.provider === 'demo' ? pill('Demo · No model call', 'amber') : ''}${button('Validation details', 'inspect', `data-run="${esc(run.id)}"`)}</div>` : ''}
+      ${run ? `<div class="chat-run-meta">${pill(statusLabel[run.status], run.status === 'corrected' || run.status === 'consistent' ? 'green' : run.status === 'unresolved' || run.status === 'failed' ? 'red' : run.status === 'uncertain' ? 'amber' : 'slate')}${registrationPill(run)}${run.provider === 'demo' ? pill('Demo · No model call', 'amber') : ''}${button('Validation details', 'inspect', `data-run="${esc(run.id)}"`)}</div>` : ''}
       ${run?.validation?.context_warning ? `<p class="mt-2 text-xs text-amber-800">${esc(run.ui_warning || run.validation.context_warning)}</p>` : ''}
+      ${run?.validation?.context_registration?.status === 'failed' ? `<p class="mt-2 text-xs text-amber-800">${esc(run.ui_registration_error || run.validation.context_registration.error || '')}</p>` : ''}
       ${run?.validation?.note ? `<details class="mt-2 text-xs text-slate-500"><summary>Validation note</summary><p class="mt-2">${esc(run.validation.note)}</p></details>` : ''}
       ${run ? usedContextHtml(run) : ''}
       ${run?.validation?.automatically_registered?.length ? `<p class="mt-2 text-xs text-emerald-700">Context ${run.validation.automatically_registered.length} automatically registered · linked to originals</p>` : ''}
@@ -331,35 +371,37 @@ function progressLabel() {
 function usedContextHtml(run) {
   const used = run.context_usage;
   if (!used) return `<p class="text-xs text-slate-500">No preserved input is available for this answer.</p>`;
-  const item = (value, label) => `<div class="p-3 bg-white rounded border border-slate-200 space-y-2"><div class="flex flex-wrap items-center gap-2 text-xs">${pill(label)}${value.version ? `<span>v${value.version}</span>` : ''}${value.title ? `<strong>${esc(value.title)}</strong>` : ''}${value.topics?.length ? `<span>${esc(value.topics.map(t => '#' + t).join(' '))}</span>` : ''}</div><p class="message-body text-sm">${esc(value.content)}</p>${value.selection_reason ? `<p class="text-xs text-slate-500">${esc(value.selection_reason)}</p>` : ''}${value.source_id ? button('View source', 'source', `data-message="${esc(value.source_id)}"`) : ''}</div>`;
+  const item = (value, label) => `<div class="p-3 bg-white rounded border border-slate-200 space-y-2"><div class="flex flex-wrap items-center gap-2 text-xs">${pill(label)}${value.version ? `<span>v${value.version}</span>` : ''}${value.title ? `<strong>${esc(value.title)}</strong>` : ''}${value.topics?.length ? `<span>${esc(value.topics.map(t => '#' + t).join(' '))}</span>` : ''}</div><p class="message-body text-sm">${esc(value.content)}</p>${value.selection_reason ? `<p class="text-xs text-slate-500">${esc(value.selection_reason)}</p>` : ''}${value.retrieval?.matched_terms?.length ? `<p class="text-xs text-indigo-700">Matched keywords: ${esc(value.retrieval.matched_terms.join(' · '))}</p>` : ''}${value.source_id ? button('View source', 'source', `data-message="${esc(value.source_id)}"`) : ''}</div>`;
   const topicItem = (value, included) => {
     const title = value.title || value.content?.slice(0, 64) || 'No content';
-    const label = value.entry_type === 'conversation' ? 'Context identified from the conversation' : kindLabel[value.kind] || 'Reference';
+    const label = value.entry_type === 'conversation' ? 'Context identified from the conversation' : value.entry_type === 'history' ? (value.role === 'assistant' ? 'Earlier answer' : 'Earlier user message') : kindLabel[value.kind] || 'Reference';
     return included
       ? `<div class="rounded border border-emerald-100 bg-white p-2.5 space-y-1.5"><div class="flex flex-wrap items-center gap-2 text-[11px]">${pill('Included in request', 'green')}${pill(label)}${value.version ? `<span>v${value.version}</span>` : ''}<strong>${esc(title)}</strong></div><p class="text-xs text-slate-700">${esc(value.selection_reason || 'Included in the request for this answer')}</p>${value.source_id ? button('View source', 'source', `data-message="${esc(value.source_id)}"`) : ''}</div>`
       : `<details class="rounded border border-slate-200 bg-white p-2.5 text-[11px]"><summary class="cursor-pointer text-slate-700">Excluded · ${esc(title)}${value.version ? ` · v${value.version}` : ''}</summary><div class="mt-2 space-y-2"><p class="message-body text-xs text-slate-600">${esc(value.content || '')}</p><p class="text-slate-500">${esc(value.selection_reason || 'Not included in this request')}</p>${value.source_id ? button('View source', 'source', `data-message="${esc(value.source_id)}"`) : ''}</div></details>`;
   };
 
   const includedCount = used.contexts.length + used.decisions.length + used.history.length;
-  const excludedCount = used.excluded_contexts.length + used.excluded_decisions.length;
+  const excludedCount = used.excluded_contexts.length + used.excluded_decisions.length + (used.excluded_history?.length || 0);
   return `<details class="answer-context rounded-xl border border-indigo-200 bg-indigo-50/70" data-context-run="${esc(run.id)}">
     <summary class="answer-context-summary"><span class="font-semibold">Context sent with this answer</span><span class="text-xs font-normal text-slate-500">${countLabel(includedCount, 'Included', 'items sent', 'item sent')} · ${countLabel(excludedCount, 'Excluded', 'items excluded', 'item excluded')} · ${esc(used.model)}</span></summary>
     <div class="px-4 pb-4 space-y-4">
     <div class="flex flex-wrap gap-2 items-center justify-end border-b border-indigo-100 pb-3 text-xs text-slate-500">
-      <span>${esc(phaseLabel[used.phase] || used.phase)}</span>
+      <span>Input recorded for this answer · ${run.created_at ? esc(new Date(run.created_at).toLocaleString(DATE_LOCALE)) : ''} · ${esc(phaseLabel[used.phase] || used.phase)}</span>
     </div>
 
     <div class="space-y-2">
       <div class="flex flex-wrap items-center justify-between text-xs gap-2">
-        <span class="font-medium text-slate-700">Topics inferred from the question · ${used.selection_mode === 'semantic' ? 'Semantic selection' : 'Tag and rule-based selection'}</span>
+        <span class="font-medium text-slate-700">Topics inferred from the question · ${used.selection_mode === 'fts5' ? 'SQLite FTS5 keyword search' : used.selection_mode === 'semantic' ? 'Semantic selection' : 'Tag and rule-based selection'}</span>
         <div class="flex gap-1.5">
           ${pill(countLabel(used.contexts.length, 'Stored contexts included', 'stored contexts included', 'stored context included'), 'green')}
-          ${pill(countLabel(used.decisions.length, 'Conversation context included', 'conversation context included'))}
+          ${pill(countLabel(used.decisions.length, 'Conversation-derived context', 'conversation-derived items included'))}
           ${pill(countLabel(used.excluded_contexts.length, 'Stored contexts excluded', 'stored contexts excluded', 'stored context excluded'))}
           ${pill(countLabel(used.excluded_decisions.length, 'Conversation context excluded', 'conversation context excluded'))}
+          ${(used.excluded_history?.length || 0) ? pill(countLabel(used.excluded_history.length, 'Earlier dialogue excluded', 'earlier dialogue excluded', 'earlier message excluded')) : ''}
         </div>
       </div>
       <div class="flex flex-wrap gap-1.5">${used.topics.length ? used.topics.map(topic => pill(`#${topic}`, 'indigo')).join('') : '<span class="text-xs text-slate-500">No topic was detected.</span>'}</div>
+      ${used.search ? `<p class="text-xs text-slate-500">SQLite FTS5 keyword/topic score threshold ${Math.round(used.search.threshold * 100)}% · ${countLabel(used.search.candidates?.length || 0, 'retrieval candidates', 'retrieval candidates', 'retrieval candidate')}</p>` : ''}
       ${used.selection_warning ? `<p class="rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">${esc(used.selection_warning)}</p>` : ''}
       ${used.topic_clusters?.length ? `
         <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5">
@@ -377,7 +419,7 @@ function usedContextHtml(run) {
               <div class="space-y-1.5 pt-1.5 border-t border-slate-100">
                 ${cluster.injected_items.map(it => topicItem(it, true)).join('')}
                 ${cluster.excluded_items.map(it => topicItem(it, false)).join('')}
-          ${!cluster.injected_items.length && !cluster.excluded_items.length ? '<p class="text-[11px] text-slate-500">No saved context is linked to this topic.</p>' : ''}
+          ${!cluster.injected_items.length && !cluster.excluded_items.length ? '<p class="text-[11px] text-slate-500">No saved context is linked to this topic. Conversation-derived context is listed separately below.</p>' : ''}
               </div>
             </div>
           `).join('')}
@@ -387,7 +429,7 @@ function usedContextHtml(run) {
           <span class="text-slate-600">Topics inferred from this question:</span>
           ${used.topics.map(t => pill(`#${t}`)).join('')}
           ${pill(countLabel(used.contexts.length, 'Stored context', 'stored contexts', 'stored context'))}
-          ${pill(countLabel(used.decisions.length, 'Conversation context', 'conversation context entries', 'conversation context entry'))}
+          ${pill(countLabel(used.decisions.length, 'Conversation-derived context', 'conversation-derived items', 'conversation-derived item'))}
           ${pill(countLabel(used.history.length, 'Earlier message', 'earlier messages', 'earlier message'))}
         </div>
       `}
@@ -400,9 +442,9 @@ function usedContextHtml(run) {
       </div>
       <div class="space-y-2">
         ${used.current_question ? item(used.current_question, 'Question for this answer · not saved context') : ''}
-        ${used.contexts.map(c => item(c, kindLabel[c.kind] || 'Reference')).join('')}
-        ${used.decisions.map(d => item(d, 'Context identified from the conversation')).join('')}
-        ${used.history.map(h => item(h, h.role === 'user' ? 'Earlier user message' : 'Earlier answer')).join('')}
+        <section class="space-y-2"><h3 class="text-xs font-semibold text-slate-700">Saved context · ${used.contexts.length}</h3>${used.contexts.map(c => item(c, kindLabel[c.kind] || 'Reference')).join('') || '<p class="text-xs text-slate-500">No saved context was sent with this answer.</p>'}</section>
+        <section class="space-y-2"><h3 class="text-xs font-semibold text-slate-700">Conversation-derived context · ${used.decisions.length}</h3>${used.decisions.map(d => item(d, 'Context identified from the conversation')).join('') || '<p class="text-xs text-slate-500">No conversation-derived decisions were sent with this answer.</p>'}</section>
+        <section class="space-y-2"><h3 class="text-xs font-semibold text-slate-700">Earlier dialogue · ${used.history.length}</h3>${used.history.map(h => item(h, h.role === 'user' ? 'Earlier user message' : 'Earlier answer')).join('') || '<p class="text-xs text-slate-500">No earlier dialogue messages were sent with this answer.</p>'}</section>
         ${!used.contexts.length && !used.decisions.length && !used.history.length ? '<p class="text-xs text-slate-500 bg-white p-2.5 rounded border border-slate-200">Only the current question was sent, with no additional context.</p>' : ''}
       </div>
     </div>
@@ -419,6 +461,7 @@ function renderChat() {
   const previousTop = previousStream?.scrollTop || 0;
   const wasNearBottom = !previousStream || previousStream.scrollHeight - previousStream.scrollTop - previousStream.clientHeight < 100;
   const busy = sending || detail.runs.some(r => r.status === 'running');
+  const shouldStickToBottom = wasNearBottom || (busy && chatStickToBottom);
   const loginRequired = chatNeedsLogin();
   const failed = detail.runs.filter(r => r.status === 'failed');
   document.body.classList.add('chat-mode');
@@ -434,7 +477,7 @@ function renderChat() {
       <form id="chat-form" class="chat-composer">
         <p id="chat-model-guidance" class="chat-model-guidance">${loginRequired ? 'ChatGPT sign-in is only needed for live model answers. Your saved context and conversations remain available.' : currentChatModel() ? 'The agent identifies the conversation topic, finds relevant context, and uses it in the response.' : 'Choose a model in the composer to start right away.'}</p>
         <textarea id="chat-input" aria-label="Message" maxlength="4000" rows="1" class="chat-input" placeholder="${loginRequired ? 'Connect a ChatGPT model to send a message' : 'Send a message'}" ${busy || loginRequired ? 'disabled' : ''}>${esc(draft)}</textarea>
-        <div class="chat-composer-toolbar"><span class="chat-composer-hint">${state.settings.provider === 'chatgpt' && state.auth.chatgptConnected ? '<a href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener noreferrer">ChatGPT usage</a> · ' : ''}⌘ / Ctrl + Enter to send · Enter for a new line · <span id="char-count">${draft.length}/4000</span></span><div class="chat-composer-actions"><div id="model-picker" class="${loginRequired ? 'hidden' : ''}"></div><button type="submit" class="chat-send" aria-label="Send" title="Send" ${busy || loginRequired || !currentChatModel() ? 'disabled' : ''}><span class="material-symbols-outlined">arrow_upward</span></button></div></div>
+        <div class="chat-composer-toolbar"><span class="chat-composer-hint">${state.settings.provider === 'chatgpt' && state.auth.chatgptConnected ? '<a href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener noreferrer">ChatGPT usage</a> · ' : ''}<span id="char-count">${draft.length}/4000</span></span><div class="chat-composer-actions"><div id="model-picker" class="${loginRequired ? 'hidden' : ''}"></div>${reasoningPickerHtml(busy)}<button type="submit" class="chat-send" aria-label="Send" title="Send" ${busy || loginRequired || !draft.trim() || !currentChatModel() ? 'disabled' : ''}><span class="material-symbols-outlined">arrow_upward</span></button></div></div>
       </form>
       <p class="chat-footer-note">Expand an answer to inspect the context sent and its source evidence.</p>
     </div>
@@ -442,7 +485,19 @@ function renderChat() {
   <button type="button" id="chat-context-backdrop" class="chat-context-backdrop ${contextPanelOpen ? 'is-open' : ''}" data-action="close-context-panel" aria-label="Close context panel" tabindex="-1"></button>
   <aside id="chat-context-drawer" class="chat-context-drawer ${contextPanelOpen ? 'is-open' : ''}" role="complementary" aria-label="Context for this conversation" aria-hidden="${!contextPanelOpen}" ${contextPanelOpen ? '' : 'inert'}>${chatContextPanel()}</aside>`;
   const stream = $('#chat-stream');
-  if (stream && detail.messages.length) stream.scrollTop = wasNearBottom ? stream.scrollHeight : previousTop;
+  if (stream && detail.messages.length) {
+    stream.addEventListener('scroll', () => {
+      chatStickToBottom = stream.scrollHeight - stream.scrollTop - stream.clientHeight < 80;
+    }, { passive: true });
+    if (shouldStickToBottom) {
+      chatStickToBottom = true;
+      stream.scrollTop = stream.scrollHeight;
+      requestAnimationFrame(() => { if (stream.isConnected && chatStickToBottom) stream.scrollTop = stream.scrollHeight; });
+    } else {
+      chatStickToBottom = false;
+      stream.scrollTop = previousTop;
+    }
+  }
   renderModelPicker();
   $('#context-panel-toggle')?.setAttribute('aria-expanded', String(contextPanelOpen));
 }
@@ -451,7 +506,7 @@ function syncChatModelState() {
   if (guide) guide.textContent = chatNeedsLogin() ? 'ChatGPT sign-in is only needed for live model answers. Your saved context and conversations remain available.' : currentChatModel() ? 'The agent identifies the conversation topic, finds relevant context, and uses it in the response.' : 'Choose a model in the composer to start right away.';
   const submit = $('#chat-form button[type="submit"]');
   const busy = sending || (detail?.runs || []).some(run => run.status === 'running');
-  if (submit) submit.disabled = chatNeedsLogin() || !currentChatModel() || busy;
+  if (submit) submit.disabled = chatNeedsLogin() || !currentChatModel() || busy || !draft.trim();
   const input = $('#chat-input');
   if (input) { input.disabled = chatNeedsLogin() || busy; input.placeholder = chatNeedsLogin() ? 'Connect a ChatGPT model to send a message' : 'Send a message'; }
 }
@@ -477,8 +532,8 @@ function chatContextPanel() {
 
   const groups = Array.from(topicMap.values());
 
-  return `<div class="flex justify-between items-center gap-2"><h2 class="text-sm font-semibold">Context for this conversation</h2>${button('Manage', 'contexts')}</div><p class="text-xs text-slate-500">This preview is based on topic scopes and conversation-specific overrides. Semantic selection runs for each question; the answer receipt shows what was actually sent.</p>
-    ${lastSelectionHtml()}${candidatePanel(true)}<section class="space-y-3"><div class="flex justify-between text-xs font-medium text-slate-600"><span>Topic and inclusion preview</span>${pill(countLabel(selected.length, 'Rule-based include', 'contexts included by rules', 'context included by rules'), 'green')}</div>
+  return `<div class="flex justify-between items-center gap-2"><h2 class="text-sm font-semibold">Context for this conversation</h2>${button('Manage', 'contexts')}</div><p class="text-xs text-slate-500">Search question keywords with SQLite FTS5 and retrieve up to 8 context items above the score threshold. Chat-specific choices also apply, and each answer receipt records the actual scores and content sent.</p>
+    ${lastSelectionHtml()}${candidatePanel(true)}<section class="space-y-3"><div class="flex justify-between text-xs font-medium text-slate-600"><span>Current settings preview · candidates for the next answer</span>${pill(countLabel(selected.length, 'Rule-based include', 'contexts included by rules', 'context included by rule'), 'green')}</div><p class="text-xs text-slate-500">This preview uses the current topics and inclusion settings. The next question's actual search scores and sent items will be recorded in that answer's receipt.</p>
     <div class="flex flex-wrap items-center gap-1.5 text-xs"><span class="text-slate-500">Latest answer topics:</span>${topics.length ? topics.map(topic => pill(`#${topic}`, 'indigo')).join('') : '<span class="text-slate-500">No topics have been identified yet.</span>'}</div>
     ${groups.map(group => `
       <div class="rounded-xl border ${group.selected.length ? 'border-indigo-200 bg-white' : 'border-slate-200 bg-slate-100/60'} p-3 space-y-2.5">
@@ -522,27 +577,37 @@ function visibleContexts() {
   return project.contexts.filter(item => (contextStatus === 'all' || item.status === contextStatus) && (contextKind === 'all' || item.kind === contextKind) && (!query || [item.title, item.content, ...item.topics].join(' ').toLowerCase().includes(query)));
 }
 function candidatePanel(compact = false) {
+  const pending = project.candidates.filter(c => c.status === 'pending');
   const all = project.candidates.filter(c => c.status === 'accepted');
   const items = compact ? all.slice(0, 3) : all;
-  return `<section class="space-y-3"><div class="flex justify-between items-center"><h2 class="text-sm font-semibold">Automatic registration history · ${all.length}</h2>${compact ? button('View all', 'context-candidates') : ''}</div><p class="text-xs text-slate-500">Context is automatically registered from user messages and assistant replies after checking the original text. Assistant suggestions remain hypotheses.</p>${items.map(item => `<article class="rounded-xl border border-emerald-200 bg-white p-4 space-y-3"><h3 class="text-sm font-semibold">${esc(item.title)}</h3>${pill(item.kind === 'decision' ? 'Context identified from the conversation' : kindLabel[item.kind])}<blockquote class="message-body border-l-2 border-slate-300 pl-3 text-sm">${esc(item.content)}</blockquote><p class="text-xs text-slate-500">${item.scope === 'project' ? 'Project-wide' : item.topics.map(t => '#' + esc(t)).join(' ')} · ${esc(new Date(item.created_at).toLocaleString(DATE_LOCALE))}</p><div class="flex gap-2">${button('View source', 'source', `data-message="${item.source_id}"`)}${button('Extraction input and result', 'inspect', `data-run="${item.run_id}"`)}</div></article>`).join('') || '<p class="text-xs text-slate-500">No context has been registered yet. Connect a model and chat to register context automatically.</p>'}</section>`;
+  const reviewCards = pending.map(item => `<article class="rounded-xl border border-amber-200 bg-amber-50/50 p-4 space-y-3"><div class="flex flex-wrap justify-between gap-2"><h3 class="text-sm font-semibold">${esc(item.title)}</h3>${pill('Hypothesis', 'amber')}</div><blockquote class="message-body border-l-2 border-amber-300 pl-3 text-sm">${esc(item.content)}</blockquote><p class="text-xs text-slate-500">A suggestion from a model response. Once approved, it can be sent as reference for later related questions. · ${item.topics.map(t => '#' + esc(t)).join(' ')}</p><div class="flex flex-wrap gap-2">${button('View source', 'source', `data-message="${item.source_id}"`)}${button('Approve and save', 'review-candidate', `data-candidate="${item.id}" data-review="accept"`)}${button('Dismiss', 'review-candidate', `data-candidate="${item.id}" data-review="dismiss"`)}</div></article>`).join('');
+  const history = items.map(item => `<article class="rounded-xl border border-emerald-200 bg-white p-4 space-y-3"><h3 class="text-sm font-semibold">${esc(item.title)}</h3>${pill(item.kind === 'decision' ? 'Context identified from the conversation' : kindLabel[item.kind])}<blockquote class="message-body border-l-2 border-slate-300 pl-3 text-sm">${esc(item.content)}</blockquote><p class="text-xs text-slate-500">${item.scope === 'project' ? 'Project-wide' : item.topics.map(t => '#' + esc(t)).join(' ')} · ${esc(new Date(item.created_at).toLocaleString(DATE_LOCALE))}</p><div class="flex gap-2">${button('View source', 'source', `data-message="${item.source_id}"`)}${button('Extraction input and result', 'inspect', `data-run="${item.run_id}"`)}</div></article>`).join('');
+  if (compact) return `${pending.length ? `<section class="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3"><div class="flex justify-between items-center"><h3 class="text-xs font-semibold">Model suggestions to review ${pending.length}</h3>${button('Review', 'context-candidates')}</div><p class="text-xs text-slate-600">Assistant hypotheses are not used as saved context until you approve them.</p></section>` : ''}${all.length ? `<section class="space-y-2"><div class="flex justify-between items-center"><h3 class="text-xs font-semibold">Automatic registration history · ${all.length}</h3>${button('View all', 'context-candidates')}</div>${items.map(item => `<article class="rounded-lg border border-emerald-200 bg-white p-3 space-y-2"><div class="flex gap-2 items-center">${pill(item.kind === 'decision' ? 'Context identified from the conversation' : kindLabel[item.kind])}<strong class="text-xs">${esc(item.title)}</strong></div><p class="message-body text-xs text-slate-600">${esc(item.content)}</p></article>`).join('')}</section>` : ''}`;
+  return `<section class="space-y-4"><div><h2 class="text-sm font-semibold">Awaiting review · ${pending.length}</h2><p class="text-xs text-slate-500 mt-1">Context from user messages is registered automatically. Suggestions from model replies stay as hypotheses and are not sent in answers until approved.</p></div>${reviewCards || '<p class="text-xs text-slate-500">There are no model suggestions awaiting review.</p>'}<div class="space-y-3 border-t border-slate-200 pt-4"><h2 class="text-sm font-semibold">Registration history · ${all.length}</h2>${history || '<p class="text-xs text-slate-500">No context has been registered yet. As you chat, useful context is identified from your original messages.</p>'}</div></section>`;
+}
+function decisionPanel() {
+  const items = project.decisions || [];
+  const card = item => `<article class="rounded-xl border border-slate-200 bg-white p-4 space-y-3"><div class="flex flex-wrap items-center justify-between gap-2"><div class="flex gap-2 items-center">${pill(item.status === 'active' ? 'Active' : item.status === 'archived' ? 'Archived' : 'Superseded previous version', item.status === 'active' ? 'green' : 'slate')}${pill(item.scope === 'project' ? 'Project-wide' : item.topics.map(t => '#' + esc(t)).join(' '))}<span class="text-xs text-slate-500">v${item.version}</span></div>${item.status !== 'superseded' ? `<div class="flex gap-2">${button(item.status === 'active' ? 'Archive' : 'Restore', 'archive-decision', `data-decision="${item.id}" data-archived="${item.status === 'active'}"`)}${button('Delete', 'delete-decision', `data-decision="${item.id}"`)}</div>` : ''}</div><p class="message-body text-sm font-medium">${esc(item.content)}</p><div class="flex gap-2">${button('View source', 'source', `data-message="${item.source_id}"`)}</div></article>`;
+  return `<section class="space-y-4"><div><h2 class="text-sm font-semibold">Conversation-derived information · ${items.length}</h2><p class="text-xs text-slate-500 mt-1">Only criteria explicitly stated by the user appear here. Review each source and scope, then archive or delete criteria you no longer need.</p></div><div class="space-y-3">${items.map(card).join('') || '<p class="text-sm text-slate-500 rounded-lg border border-dashed border-slate-300 p-5">No user-stated criteria have been registered yet.</p>'}</div></section>`;
 }
 function lastSelectionHtml() {
   const last = contextPreview.last_selection;
   if (!last) return '';
-  return `<section class="p-4 rounded-xl border border-indigo-200 bg-white space-y-3"><h3 class="text-sm font-semibold">Context used in the latest answer</h3><p class="text-xs text-slate-500">${esc(last.question)} · ${last.mode === 'semantic' ? 'Selected by question meaning' : last.mode === 'tag_fallback' ? 'Automatic selection failed · Using tags' : 'Tag and manual selection'}</p>${last.items.map(item => `<div class="text-xs space-y-1"><p class="font-semibold">${esc(item.title)} · v${item.version}</p><p class="text-indigo-600">${esc(item.selection_reason)}</p></div>`).join('') || '<p class="text-xs text-slate-500">No reference context used</p>'}${button('Selection and actual model input', 'inspect', `data-run="${last.run_id}"`)}</section>`;
+  const included = last.receipt?.included || {};
+  return `<section class="p-4 rounded-xl border border-indigo-200 bg-white space-y-3"><h3 class="text-sm font-semibold">Actual input sent with this answer</h3><p class="text-xs text-slate-500">${esc(last.question)} · ${last.created_at ? esc(new Date(last.created_at).toLocaleString(DATE_LOCALE)) : ''} · ${last.mode === 'fts5' ? 'Automatically selected by SQLite FTS5 keyword/topic score' : last.mode === 'semantic' ? 'Selected by question meaning' : last.mode === 'tag_fallback' ? 'Automatic selection failed · Using tags' : 'Tag and manual selection'}</p><p class="text-xs text-indigo-700">Saved context ${included.saved_contexts || 0} · Conversation context ${included.conversation_contexts || 0} · Earlier messages ${included.previous_messages || 0}</p>${last.items.map(item => `<div class="text-xs space-y-1"><p class="font-semibold">${esc(item.title)} · v${item.version}</p><p class="text-indigo-600">${esc(item.selection_reason)}</p></div>`).join('') || '<p class="text-xs text-slate-500">No saved context was sent with that answer.</p>'}${button('Selection and actual model input', 'inspect', `data-run="${last.run_id}"`)}</section>`;
 }
 function contextListHtml() {
   const items = visibleContexts();
-  return items.map(item => `<article class="bg-white border ${editor?.id === item.id ? 'border-indigo-300' : 'border-slate-200'} rounded-xl p-4 space-y-3"><div class="flex flex-wrap justify-between gap-2"><button type="button" data-action="edit-context" data-context="${item.id}" class="font-semibold text-sm text-left hover:text-indigo-700">${esc(item.title)}</button><div class="flex gap-1">${pill(kindLabel[item.kind], item.kind === 'hypothesis' ? 'amber' : 'slate')}${item.registration === 'automatic' ? pill('Automatically registered', 'green') : ''}${item.status === 'archived' ? pill('Archived') : ''}</div></div><p class="context-snippet text-sm text-slate-600">${esc(item.content)}</p><div class="flex flex-wrap gap-2 text-xs text-slate-500"><span>${item.scope === 'project' ? 'Project-wide' : item.topics.map(t => `#${esc(t)}`).join(' ')}</span><span>· ${includeLabel[item.include_mode]}</span><span>· v${item.version}</span></div><div class="flex flex-wrap gap-2">${button('Edit', 'edit-context', `data-context="${item.id}"`)}${button('Version history', 'context-history', `data-context="${item.id}"`)}${item.source_id ? button('Original message', 'source', `data-message="${item.source_id}"`) : ''}${button(item.status === 'archived' ? 'Restore' : 'Archive', 'archive-context', `data-context="${item.id}" data-archived="${item.status !== 'archived'}"`)}</div></article>`).join('') || `<div class="p-6 border border-dashed border-slate-300 rounded-xl text-sm text-slate-500">${project.contexts.length ? 'No context matches your search.' : 'No context yet. It is registered automatically as you chat.'}</div>`;
+  return items.map(item => `<article class="bg-white border ${editor?.id === item.id ? 'border-indigo-300' : 'border-slate-200'} rounded-xl p-4 space-y-3"><div class="flex flex-wrap justify-between gap-2"><button type="button" data-action="edit-context" data-context="${item.id}" class="font-semibold text-sm text-left hover:text-indigo-700">${esc(item.title)}</button><div class="flex gap-1">${pill(kindLabel[item.kind], item.kind === 'hypothesis' ? 'amber' : 'slate')}${item.registration === 'automatic' ? pill('Automatically registered', 'green') : ''}${item.status === 'archived' ? pill('Archived') : ''}</div></div><p class="context-snippet text-sm text-slate-600">${esc(item.content)}</p>${item.kind === 'background' ? '<p class="text-xs text-slate-500">Background records user goals, roles, and facts. It is not enforced as a project-wide rule.</p>' : ''}<div class="flex flex-wrap gap-2 text-xs text-slate-500"><span>${item.scope === 'project' ? 'Project-wide' : item.topics.map(t => `#${esc(t)}`).join(' ')}</span><span>· ${includeLabel[item.include_mode]}</span><span>· v${item.version}</span></div><div class="flex flex-wrap gap-2">${button('Edit', 'edit-context', `data-context="${item.id}"`)}${button('Version history', 'context-history', `data-context="${item.id}"`)}${item.source_id ? button('Original message', 'source', `data-message="${item.source_id}"`) : ''}${button(item.status === 'archived' ? 'Restore' : 'Archive', 'archive-context', `data-context="${item.id}" data-archived="${item.status !== 'archived'}"`)}${button('Delete', 'delete-context', `data-context="${item.id}"`)}</div></article>`).join('') || `<div class="p-6 border border-dashed border-slate-300 rounded-xl text-sm text-slate-500">${project.contexts.length ? 'No context matches your search.' : 'No context yet. It is registered automatically as you chat.'}</div>`;
 }
 function renderContexts() {
   const tab = contextTab;
   $('#view').innerHTML = `<div class="p-4 md:p-6 space-y-5"><div class="flex flex-wrap justify-between gap-3 items-center"><div><h1 class="text-xl font-semibold">Context manager</h1><p class="text-sm text-slate-500 mt-2">${esc(project.project.name)} — review its background, references, and context identified from the conversation.</p></div><div class="flex flex-wrap gap-2">${button('New context', 'new-context')}</div></div>
-  <div class="flex gap-5 border-b border-slate-200"><button type="button" data-action="context-materials" class="pb-3 text-sm ${tab === 'materials' ? 'border-b-2 border-indigo-600 text-indigo-700 font-semibold' : 'text-slate-500'}">Background, references, hypotheses ${project.contexts.filter(c => c.status === 'active').length}</button><button type="button" data-action="context-candidates" class="pb-3 text-sm ${tab === 'candidates' ? 'border-b-2 border-indigo-600 text-indigo-700 font-semibold' : 'text-slate-500'}">Automatic registration history ${project.candidates.filter(c => c.status === 'accepted').length}</button></div>
-  ${tab === 'candidates' ? candidatePanel(false) : `<div class="grid grid-cols-1 xl:grid-cols-12 gap-5"><section class="xl:col-span-7 space-y-4"><div class="flex flex-wrap gap-2"><input id="context-search" aria-label="Search context" class="flex-1 min-w-0 rounded-lg border-slate-200 text-sm" placeholder="Search title, content, and topics" value="${esc(contextFilter)}"><select id="context-kind-filter" aria-label="Context type filter" class="rounded-lg border-slate-200 text-sm"><option value="all">All types</option>${Object.entries(kindLabel).map(([key, label]) => `<option value="${key}" ${contextKind === key ? 'selected' : ''}>${label}</option>`).join('')}</select><select id="context-status-filter" aria-label="Context status filter" class="rounded-lg border-slate-200 text-sm">${[['active', 'Active'], ['archived', 'Archived'], ['all', 'All']].map(([key, label]) => `<option value="${key}" ${contextStatus === key ? 'selected' : ''}>${label}</option>`).join('')}</select></div><div id="context-list" class="space-y-3">${contextListHtml()}</div></section><aside class="xl:col-span-5"><div class="context-editor">${contextEditorHtml()}</div></aside></div>`}</div>`;
+  <div class="flex flex-wrap gap-5 border-b border-slate-200"><button type="button" data-action="context-materials" class="pb-3 text-sm ${tab === 'materials' ? 'border-b-2 border-indigo-600 text-indigo-700 font-semibold' : 'text-slate-500'}">Background, references, hypotheses ${project.contexts.filter(c => c.status === 'active').length}</button><button type="button" data-action="context-decisions" class="pb-3 text-sm ${tab === 'decisions' ? 'border-b-2 border-indigo-600 text-indigo-700 font-semibold' : 'text-slate-500'}">Items understood from the conversation ${project.decisions.length}</button><button type="button" data-action="context-candidates" class="pb-3 text-sm ${tab === 'candidates' ? 'border-b-2 border-indigo-600 text-indigo-700 font-semibold' : 'text-slate-500'}">Review model suggestions ${project.candidates.filter(c => c.status === 'pending').length}</button></div>
+  ${tab === 'candidates' ? candidatePanel(false) : tab === 'decisions' ? decisionPanel() : `<div class="grid grid-cols-1 xl:grid-cols-12 gap-5"><section class="xl:col-span-7 space-y-4"><div class="flex flex-wrap gap-2"><input id="context-search" aria-label="Search context" class="flex-1 min-w-0 rounded-lg border-slate-200 text-sm" placeholder="Search title, content, and topics" value="${esc(contextFilter)}"><select id="context-kind-filter" aria-label="Context type filter" class="rounded-lg border-slate-200 text-sm"><option value="all">All types</option>${Object.entries(kindLabel).map(([key, label]) => `<option value="${key}" ${contextKind === key ? 'selected' : ''}>${label}</option>`).join('')}</select><select id="context-status-filter" aria-label="Context status filter" class="rounded-lg border-slate-200 text-sm">${[['active', 'Active'], ['archived', 'Archived'], ['all', 'All']].map(([key, label]) => `<option value="${key}" ${contextStatus === key ? 'selected' : ''}>${label}</option>`).join('')}</select></div><div id="context-list" class="space-y-3">${contextListHtml()}</div></section><aside class="xl:col-span-5"><div class="context-editor">${contextEditorHtml()}</div></aside></div>`}</div>`;
 }
 function contextEditorHtml() {
-  if (!editor) return `<section class="bg-white border border-slate-200 rounded-xl p-5 space-y-4"><h2 class="font-semibold">Use relevant context in answers</h2><p class="text-sm text-slate-500 leading-relaxed">Manage project background, references, and hypotheses separately. With automatic management enabled, the model compares each item with the question and selects relevant context.</p><p class="text-sm text-slate-500 leading-relaxed">You can include or exclude context in chat. Each answer shows which conversation context was actually sent to the model.</p>${project.contexts.length ? '<p class="text-xs text-indigo-600">Select an item to edit its content and scope.</p>' : button('Add your first context', 'new-context')}</section>`;
+  if (!editor) return `<section class="bg-white border border-slate-200 rounded-xl p-5 space-y-4"><h2 class="font-semibold">Use relevant context in answers</h2><p class="text-sm text-slate-500 leading-relaxed">Manage project background, references, and hypotheses separately. SQLite FTS5 combines question keyword matches (70%) and topic matches (30%); this is not embedding-based semantic similarity. By default, up to 8 items scoring at least 50% are included.</p><p class="text-sm text-slate-500 leading-relaxed">You can include or exclude context in chat. Each answer shows which conversation context was actually sent to the model.</p>${project.contexts.length ? '<p class="text-xs text-indigo-600">Select an item to edit its content and scope.</p>' : button('Add your first context', 'new-context')}</section>`;
   const item = editor;
   return `<section class="bg-white border border-slate-200 rounded-xl p-5 space-y-4"><div class="flex items-center justify-between"><h2 class="font-semibold">${item.id ? 'Edit context' : 'New context'}</h2>${item.id ? pill(`v${item.version}`) : ''}</div><form id="context-form" class="space-y-4"><label class="block text-xs text-slate-600">Title<input name="title" required maxlength="120" class="block w-full rounded-lg border-slate-200 text-sm mt-1" placeholder="Example: Target users and their problem" value="${esc(item.title)}"></label><label class="block text-xs text-slate-600">Type<select name="kind" class="block w-full rounded-lg border-slate-200 text-sm mt-1">${Object.entries(kindLabel).map(([key, label]) => `<option value="${key}" ${item.kind === key ? 'selected' : ''}>${label}</option>`).join('')}</select></label><label class="block text-xs text-slate-600">Content<textarea name="content" required maxlength="30000" rows="8" class="block w-full rounded-lg border-slate-200 text-sm mt-1" placeholder="Add context needed for the answer.">${esc(item.content)}</textarea></label><div class="grid grid-cols-2 gap-3"><label class="block text-xs text-slate-600">Scope<select name="scope" class="block w-full rounded-lg border-slate-200 text-sm mt-1"><option value="project" ${item.scope === 'project' ? 'selected' : ''}>Project-wide</option><option value="topic" ${item.scope === 'topic' ? 'selected' : ''}>Selected topics</option></select></label><label class="block text-xs text-slate-600">Inclusion mode<select name="include_mode" class="block w-full rounded-lg border-slate-200 text-sm mt-1">${Object.entries(includeLabel).map(([key, label]) => `<option value="${key}" ${item.include_mode === key ? 'selected' : ''}>${label}</option>`).join('')}</select></label></div><label class="block text-xs text-slate-600">Topics<input name="topics" class="block w-full rounded-lg border-slate-200 text-sm mt-1" placeholder="Product, Evaluation · Separate with commas" value="${esc(item.topics.join(', '))}"></label><p class="text-xs text-slate-500">Hypotheses are not confirmed facts. ‘Always include’ applies to all conversations in this project.</p>${item.source_id ? '<p class="text-xs text-indigo-600">The original message is linked. Edits are saved as separate versions.</p>' : ''}<div class="flex gap-2"><button class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium">${item.id ? 'Save new version' : 'Save context'}</button>${button('Close', 'close-editor')}</div></form></section>`;
 }
@@ -571,8 +636,9 @@ async function renderInspector() {
   const run = await api(`/runs/${runId}`);
   if (pageName !== 'inspector') return;
   selectedRun = runId;
-  $('#view').innerHTML = `${run.provider === 'demo' ? demoNotice() : ''}<div class="p-4 md:p-6 space-y-4"><div class="bg-white border border-slate-200 rounded-lg p-4 flex flex-wrap justify-between gap-3"><div class="space-y-2"><h1 class="text-lg font-semibold">Actual context sent for each answer</h1><select id="run-select" aria-label="Select answer" class="text-xs rounded border-slate-200">${detail.runs.map(r => `<option value="${r.id}" ${r.id === run.id ? 'selected' : ''}>${esc(shortId(r.id))} · ${esc(statusLabel[r.status])}</option>`).join('')}</select> ${pill(run.status === 'running' && run.assistant_message_id ? 'Answer checked · registering context' : statusLabel[run.status], run.status === 'failed' ? 'red' : 'slate')}<p class="text-xs text-slate-500">These are preserved request inputs, not a measure of model attention or influence.</p></div><div class="flex gap-2 items-start">${button('View stages', 'inspector-columns')}${button('Compare inputs', 'inspector-diff')}</div></div>
+  $('#view').innerHTML = `${run.provider === 'demo' ? demoNotice() : ''}<div class="p-4 md:p-6 space-y-4"><div class="bg-white border border-slate-200 rounded-lg p-4 flex flex-wrap justify-between gap-3"><div class="space-y-2"><h1 class="text-lg font-semibold">Actual context sent for each answer</h1><select id="run-select" aria-label="Select answer" class="text-xs rounded border-slate-200">${detail.runs.map(r => `<option value="${r.id}" ${r.id === run.id ? 'selected' : ''}>${esc(shortId(r.id))} · ${esc(statusLabel[r.status])}</option>`).join('')}</select> ${pill(statusLabel[run.status], run.status === 'failed' ? 'red' : 'slate')}${registrationPill(run)}<p class="text-xs text-slate-500">Answer time ${run.created_at ? esc(new Date(run.created_at).toLocaleString(DATE_LOCALE)) : ''} · The status reports decision-conflict validation. The records below show the input sent to the model for this answer.</p></div><div class="flex gap-2 items-start">${button('View stages', 'inspector-columns')}${button('Compare inputs', 'inspector-diff')}</div></div>
   ${run.validation?.context_warning ? `<p class="p-3 rounded bg-amber-50 text-amber-900 text-sm">${esc(run.ui_warning || run.validation.context_warning)}</p>` : ''}
+  ${run.validation?.context_registration?.status === 'failed' ? `<p class="p-3 rounded bg-amber-50 text-amber-900 text-sm">${esc(run.ui_registration_error || run.validation.context_registration.error || '')}</p>` : ''}
   ${run.error ? `<p class="p-3 rounded bg-rose-50 text-rose-800 text-sm">${esc(run.error)}<br>Failed calls preserve the prepared request body. Receipt by the provider is not guaranteed.</p>` : ''}
   ${inspectorMode === 'diff' ? compareControls(run) + '<div id="comparison-result"></div>' : `<div class="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-4 gap-4">${run.snapshots.map(snapshotCard).join('')}</div>`}
   <section class="bg-white border border-slate-200 rounded-lg p-4 space-y-3"><h2 class="font-semibold">Source evidence for this answer</h2><div class="space-y-2">${run.snapshots.flatMap(s => s.blocks.filter(b => b.source_id && (b.decision_id || b.context_id))).filter((b, i, all) => all.findIndex(x => x.source_id === b.source_id && x.version === b.version) === i).map(b => `<div class="flex flex-wrap gap-2 items-center text-xs"><span>${b.context_id ? 'Reference context' : 'Context identified from the conversation'} · v${b.version} · Source ${esc(shortId(b.source_id))}</span>${button('View source', 'source', `data-message="${esc(b.source_id)}"`)}</div>`).join('') || '<p class="text-sm text-slate-500">No linked original messages</p>'}</div></section></div>`;
@@ -601,19 +667,60 @@ async function loadComparison() {
 function renderSettings() {
   const s = state.settings;
   $('#view').innerHTML = `<div class="p-4 md:p-6 space-y-5"><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-4"><div><h1 class="text-xl font-semibold">Settings</h1><p class="mt-2 text-sm text-slate-600">Manage language and stored data.</p></div><label class="block max-w-sm rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">Interface language<select id="language-select" class="block mt-2 w-full rounded-lg border-slate-200 bg-white text-sm text-slate-800"><option value="en" ${LOCALE === 'en' ? 'selected' : ''}>English</option><option value="ko" ${LOCALE === 'ko' ? 'selected' : ''}>Korean</option></select></label><p class="text-xs text-slate-500">Records retained in server storage</p></section>${oauthSetupNoticeHtml()}<div class="grid grid-cols-1 xl:grid-cols-2 gap-5"><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
-  <form id="settings-form" class="space-y-3"><h2 class="font-semibold">Context manager</h2><label class="flex gap-2 items-center text-sm"><input id="auto-context" type="checkbox" ${s.autoContext ? 'checked' : ''}>Automatically register and select conversation context</label><p class="text-xs text-slate-500">Context is registered automatically from user messages and model replies. New context is saved after the current answer and used in later related answers. Model suggestions are treated as hypotheses.</p><button class="bg-indigo-600 text-white rounded-lg px-4 py-2 text-sm">Save settings</button></form><p class="text-xs text-slate-500">Connect ChatGPT once, then select a model in the chat composer. Credentials are stored on the server and excluded from call records and exports.</p></section>
-  <div class="space-y-5"><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-3"><h2 class="font-semibold">Storage and export</h2><p class="text-sm text-slate-600">Storage ${(state.storage_bytes / 1024).toFixed(1)} KB · Projects ${state.projects.length}</p><div class="flex flex-wrap gap-2">${button('Download all records as JSON', 'export-json')}${button('Download SQLite database', 'export-sqlite')}</div><p class="text-xs text-slate-500">Includes original conversations; excludes credentials. Import and deletion are not available yet.</p></section><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-3"><h2 class="font-semibold">Validation policy</h2><p class="text-sm text-slate-600">At most one correction · One revalidation<br>Check source quotes before correction<br>Separate project scopes<br>Preserve inputs without overwriting</p><p class="text-xs text-slate-500">Insufficient evidence or invalid validation output is marked uncertain. Conflicts that remain after revalidation are marked unresolved.</p></section><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-3"><h2 class="font-semibold">Correction flow demo</h2><p class="text-sm text-slate-600">A separate demo project shows a draft that conflicts with conversation context, followed by source review, correction, and revalidation.</p>${button('Create a demo project', 'demo')}<p class="text-xs text-amber-800">The demo makes no model calls. It does not establish semantic validation accuracy in ordinary chats.</p></section></div></div></div>`;
+  <form id="settings-form" class="space-y-3"><h2 class="font-semibold">Context manager</h2><label class="flex gap-2 items-center text-sm"><input id="auto-context" type="checkbox" ${s.autoContext ? 'checked' : ''}>Automatically register conversation context and search with SQLite FTS5</label><p class="text-xs text-slate-500">Automatically register context from user messages and model replies. Save new context after the current answer and use it for later relevant answers. Treat model suggestions as hypotheses. Select up to 8 items whose keyword scores meet the threshold.</p><button class="bg-indigo-600 text-white rounded-lg px-4 py-2 text-sm">Save settings</button></form><p class="text-xs text-slate-500">Connect ChatGPT once, then select a model in the chat composer. Credentials are stored on the server and excluded from call records and exports.</p></section>
+  <div class="space-y-5"><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-3"><h2 class="font-semibold">Storage and export</h2><p class="text-sm text-slate-600">Storage ${(state.storage_bytes / 1024).toFixed(1)} KB · Projects ${state.projects.length}</p><div class="flex flex-wrap gap-2">${button('Download all records as JSON', 'export-json')}${button('Download SQLite database', 'export-sqlite')}</div><p class="text-xs text-slate-500">Original messages are included. Credentials are excluded.</p></section><section class="bg-white border border-rose-200 rounded-xl p-5 space-y-3"><h2 class="font-semibold text-rose-800">Delete stored data</h2><p class="text-sm text-slate-600">Permanently delete all projects, chats, decisions, context, answers, and model call records from this storage. Sign-in and app settings will be kept.</p>${button('Delete all chats and context', 'clear-all-data')}</section><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-3"><h2 class="font-semibold">Validation policy</h2><p class="text-sm text-slate-600">At most one correction · One revalidation<br>Check source quotes before correction<br>Separate project scopes<br>Preserve inputs without overwriting</p><p class="text-xs text-slate-500">Insufficient evidence or invalid validation output is marked uncertain. Conflicts that remain after revalidation are marked unresolved.</p></section><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-3"><h2 class="font-semibold">Correction flow demo</h2><p class="text-sm text-slate-600">A separate demo project shows a draft that conflicts with conversation context, followed by source review, correction, and revalidation.</p>${button('Create a demo project', 'demo')}<p class="text-xs text-amber-800">The demo makes no model calls. It does not establish semantic validation accuracy in ordinary chats.</p></section></div></div></div>`;
+}
+
+async function clearAllData() {
+  const message = 'Permanently delete all projects, chats, decisions, context, answers, and call records. Sign-in and app settings will be kept.';
+  if (!window.confirm(message)) return;
+  const phrase = LOCALE === 'ko' ? 'Delete' : 'DELETE';
+  if (window.prompt(LOCALE === 'ko' ? 'Type DELETE to continue.' : 'Type DELETE to continue.') !== phrase) return;
+  const result = await api('/data', 'DELETE', {});
+  state = await api('/state');
+  selectedRun = null; editor = null; topics = []; contextPreview = { selected: [], excluded: [] };
+  await loadProject(result.project.id);
+  navigate('chat');
+  toast('All chat and context records have been deleted. Sign-in and app settings were kept.');
+}
+async function deleteContextItem(contextId) {
+  const item = project.contexts.find(context => context.id === contextId);
+  if (!item) throw new Error('Context not found.');
+  if (!window.confirm('Delete this context and every version. The original message remains in the chat and will not be automatically registered again. Other saved items that reference the same source may still be used. Past answer receipts are retained.')) return;
+  const result = await api(`/contexts/${contextId}`, 'DELETE', {});
+  if (editor && result.context_ids.includes(editor.id)) editor = null;
+  await refresh();
+  toast('Context and all versions deleted. Past answer receipts are retained.');
+}
+async function deleteDecisionItem(decisionId) {
+  if (!window.confirm('Delete this criterion and all superseded versions. The original message and past answer receipts are retained. Other saved items that reference the same source may still be used.')) return;
+  await api(`/decisions/${decisionId}`, 'DELETE', {});
+  await refresh();
+  toast('Criterion and all versions deleted. Past answer receipts are retained.');
+}
+async function deleteConversation(sessionId) {
+  const item = project.sessions.find(candidate => candidate.id === sessionId);
+  if (!item) throw new Error('Conversation not found.');
+  if (!window.confirm('Delete this chat, its messages, answers, and model call records. Every version of context and criteria from this chat will also be deleted. Past receipts in other chats are retained. If this is the last chat, an empty one will be created.')) return;
+  const wasCurrent = session.id === sessionId;
+  const result = await api(`/sessions/${sessionId}`, 'DELETE', {});
+  if (wasCurrent) {
+    draft = ''; compare = null; selectedRun = null; editor = null;
+    await loadProject(result.project_id, result.replacement_session.id);
+    navigate('chat');
+  } else await refresh();
+  toast('Chat deleted.');
 }
 async function sendMessage() {
   if (chatNeedsLogin()) { toast('Log in to ChatGPT at the bottom left.'); return; }
   if (sending || detail.runs.some(r => r.status === 'running') || !draft.trim()) return;
+  chatStickToBottom = true;
   sending = true;
   try {
     const response = await api(`/sessions/${session.id}/messages`, 'POST', { content: draft, topics: [] });
     draft = ''; selectedRun = response.run_id || selectedRun;
     sending = false;
     await refresh();
-    const stream = $('#chat-stream'); if (stream) stream.scrollTo({ top: stream.scrollHeight, behavior: 'smooth' });
   } catch (error) { sending = false; toast(error.message); render(); }
 }
 async function syncConnection() {
@@ -684,7 +791,7 @@ document.addEventListener('submit', async event => {
   } catch (error) { toast(error.message); }
 });
 document.addEventListener('input', event => {
-  if (event.target.id === 'chat-input') { draft = event.target.value; $('#char-count').textContent = `${draft.length}/4000`; event.target.style.height = 'auto'; event.target.style.height = `${Math.min(event.target.scrollHeight, 220)}px`; }
+  if (event.target.id === 'chat-input') { draft = event.target.value; $('#char-count').textContent = `${draft.length}/4000`; event.target.style.height = 'auto'; event.target.style.height = `${Math.min(event.target.scrollHeight, 220)}px`; syncChatModelState(); }
   if (event.target.id === 'context-search') { contextFilter = event.target.value; $('#context-list').innerHTML = contextListHtml(); }
   if (event.target.closest('#context-form') && editor) {
     if (event.target.name === 'topics') editor.topics = topicValues(event.target.value);
@@ -692,7 +799,7 @@ document.addEventListener('input', event => {
   }
 });
 document.addEventListener('keydown', event => {
-  if (event.target.id === 'chat-input' && !event.isComposing && event.keyCode !== 229 && (event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); sendMessage(); }
+  if (event.target.id === 'chat-input' && event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229) { event.preventDefault(); sendMessage(); }
 });
 document.addEventListener('change', async event => {
   try {
@@ -702,6 +809,15 @@ document.addEventListener('change', async event => {
         sessionStorage.setItem('contextpulse.languageDraft', JSON.stringify({ sessionId: session.id, projectId: project.project.id, draft, topics, contextTab, editor, selectedRun, inspectorMode }));
         location.assign(routePath(pageName, nextLocale));
       }
+      return;
+    }
+    if (event.target.id === 'reasoning-effort') {
+      const previous = session.reasoning_effort || 'high';
+      try {
+        const result = await api(`/sessions/${session.id}/reasoning`, 'POST', { effort: event.target.value });
+        session = result.session; detail.session = session;
+        toast('Reasoning level updated for this chat.');
+      } catch (error) { event.target.value = previous; throw error; }
       return;
     }
     if (event.target.id === 'context-kind-filter') { contextKind = event.target.value; $('#context-list').innerHTML = contextListHtml(); }
@@ -760,7 +876,7 @@ document.addEventListener('click', async event => {
       renderChat(); syncChatModelState(); toast('Model changed for this chat.'); return;
     }
     if (action === 'models-refresh') return await loadModelsForProvider(state.settings.provider, true);
-    if (['context-materials', 'context-candidates'].includes(action)) { contextTab = action.split('-')[1]; return navigate('contexts'); }
+    if (['context-materials', 'context-decisions', 'context-candidates'].includes(action)) { contextTab = action.split('-')[1]; return navigate('contexts'); }
     if (action === 'analyze-context') {
       target.disabled = true;
       const result = await api(`/sessions/${session.id}/analyze-context`, 'POST', {});
@@ -782,6 +898,13 @@ document.addEventListener('click', async event => {
       if (editor?.id === target.dataset.context) editor = null;
       await refresh(); toast(target.dataset.archived === 'true' ? 'Archived. Automatically excluded from future calls.' : 'Restored for future use.'); return;
     }
+    if (action === 'archive-decision') {
+      await api(`/decisions/${target.dataset.decision}/archive`, 'POST', { archived: target.dataset.archived === 'true' });
+      await refresh(); toast(target.dataset.archived === 'true' ? 'This criterion is archived and will no longer be sent with future answers.' : 'This criterion is restored and will apply to related answers again.'); return;
+    }
+    if (action === 'delete-context') return await deleteContextItem(target.dataset.context);
+    if (action === 'delete-decision') return await deleteDecisionItem(target.dataset.decision);
+    if (action === 'delete-session') return await deleteConversation(target.dataset.session);
     if (action === 'context-override') {
       await api(`/sessions/${session.id}/context-selection`, 'POST', { context_id: target.dataset.context, mode: target.dataset.mode });
       await loadContextPreview(); renderChat(); toast('Saved context choices for this conversation.'); return;
@@ -814,6 +937,7 @@ document.addEventListener('click', async event => {
     }
     if (action === 'export-json') return download('/export', 'contextpulse-backup.json');
     if (action === 'export-sqlite') return download('/export/sqlite', 'contextpulse.sqlite');
+    if (action === 'clear-all-data') return await clearAllData();
     if (action === 'compare-previous') {
       const current = detail.runs.findIndex(r => r.id === selectedRun), previous = detail.runs[current + 1];
       if (!previous) throw new Error('No previous answer record.');

@@ -8,11 +8,11 @@ function routeName() {
 }
 const $ = (selector) => document.querySelector(selector);
 const esc = (value = '') => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const phaseLabel = { selection: '질문별 컨텍스트 선택', extraction: '대화 맥락 자동 등록', generation: '초안 생성', validation: '검증', correction: '교정', revalidation: '재검증' };
-const statusLabel = { extracted: '자동 등록 완료', running: '처리 중', corrected: '충돌 교정 완료', consistent: '검증 통과', uncertain: '판단 보류', unresolved: '충돌 미해결', failed: '처리 실패', no_decisions: '확인할 맥락 없음' };
+const phaseLabel = { selection: '질문별 컨텍스트 선택', extraction: '대화 맥락 자동 등록', generation: '초안 생성', validation: '검증', correction: '교정', format_correction: '답변 형식 교정', revalidation: '재검증' };
+const statusLabel = { extracted: '자동 등록 완료', running: '처리 중', corrected: '충돌 교정 완료', consistent: '검증 통과', uncertain: '판단 보류', unresolved: '충돌 미해결', failed: '처리 실패', no_decisions: '결정 검증 대상 없음' };
 let state, project, session, detail, selectedRun = null, compare = null;
 let pageName = routeName();
-let topics = [], draft = '', sending = false, poll = null, toastTimer;
+let topics = [], draft = '', sending = false, poll = null, toastTimer, chatStickToBottom = true;
 let contextPanelOpen = false;
 let inspectorMode = 'columns';
 const models = new Map();
@@ -22,6 +22,19 @@ const modelErrors = new Map();
 const kindLabel = { background: '배경 정보', reference: '참고 자료', hypothesis: '검토 중인 가설' };
 const includeLabel = { auto: '범위·주제에 따라 선택', always: '프로젝트에 항상 포함', off: '기본 포함 꺼짐' };
 let contextPreview = { selected: [], excluded: [] }, contextTab = 'materials', contextFilter = '', contextStatus = 'active', contextKind = 'all', editor = null, previewSequence = 0;
+
+function hasRunWork(runs = []) {
+  return runs.some(run => run.status === 'running' || run.validation?.context_registration?.status === 'running');
+}
+function registrationLabel(run) {
+  const status = run.validation?.context_registration?.status;
+  return ({ running: '맥락 자동 등록 중', completed: '맥락 자동 등록 완료', failed: '맥락 자동 등록 실패', interrupted: '맥락 자동 등록 중단' })[status] || '';
+}
+function registrationPill(run) {
+  const status = run.validation?.context_registration?.status;
+  const label = registrationLabel(run);
+  return label ? pill(label, status === 'completed' ? 'green' : status === 'failed' || status === 'interrupted' ? 'red' : 'amber') : '';
+}
 
 async function api(path, method = 'GET', data) {
   const request = () => fetch(`/api${path}`, { method, headers: { 'Content-Type': 'application/json', 'X-ContextPulse-Locale': LOCALE, ...(state?.csrf ? { 'X-ContextPulse-Token': state.csrf } : {}) }, ...(data !== undefined ? { body: JSON.stringify(data) } : {}) });
@@ -74,9 +87,11 @@ function showPlanWelcome() {
   if (!state.auth.accounts.some(a => a.active && a.connected && a.welcomePending) || $('#plan-welcome')) return;
   const dialog = document.createElement('dialog'); dialog.id = 'plan-welcome';
   dialog.className = 'rounded-xl border border-slate-200 shadow-xl p-6 max-w-lg w-[90vw]';
-  dialog.innerHTML = `<h2 class="text-lg font-semibold">ChatGPT 플랜을 사용합니다</h2><p class="text-sm text-slate-600 mt-3">이 앱의 지원되는 모델 요청은 연결한 ChatGPT 플랜의 사용량에 반영됩니다. 컨텍스트 선택·추출·검증·교정도 추가 요청을 사용합니다.</p><a class="block mt-3 text-sm text-indigo-700 underline" href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener noreferrer">ChatGPT 사용량 관리</a><div class="mt-5">${button('확인', 'acknowledge-plan')}</div>`;
+  dialog.setAttribute('aria-labelledby', 'plan-welcome-title');
+  dialog.setAttribute('aria-describedby', 'plan-welcome-description');
+  dialog.innerHTML = `<h2 id="plan-welcome-title" class="text-lg font-semibold">ChatGPT 플랜을 사용합니다</h2><p id="plan-welcome-description" class="text-sm text-slate-600 mt-3">이 앱의 지원되는 모델 요청은 연결한 ChatGPT 플랜의 사용량에 반영됩니다. 컨텍스트 선택·추출·검증·교정도 추가 요청을 사용합니다.</p><a class="block mt-3 text-sm text-indigo-700 underline" href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener noreferrer">ChatGPT 사용량 관리</a><div class="mt-5">${button('확인', 'acknowledge-plan')}</div>`;
   dialog.addEventListener('cancel', event => { event.preventDefault(); dialog.querySelector('button').click(); });
-  document.body.append(dialog); dialog.showModal();
+  document.body.append(dialog); dialog.showModal(); dialog.querySelector('[data-action="acknowledge-plan"]').focus({ preventScroll: true });
 }
 async function oauthCompleted() {
   clearTimeout(oauthTimer); oauthTimer = null; oauthUrl = '';
@@ -138,7 +153,27 @@ function modelPickerHtml() {
     : !connected ? `<p class="px-3 py-3 text-xs text-slate-500">ChatGPT 계정을 연결하세요.</p>`
       : modelErrors.has(provider) ? `<p class="px-3 py-3 text-xs text-rose-700" role="status">${esc(modelErrors.get(provider))}</p>`
         : !available.length ? '<p class="px-3 py-3 text-xs text-slate-500">사용 가능한 모델이 없습니다.</p>' : '';
-  return `<details id="model-menu" class="relative"><summary aria-label="모델 선택: ${esc(label)}" class="list-none cursor-pointer flex max-w-[180px] items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"><span class="material-symbols-outlined text-indigo-600 text-[18px]">auto_awesome</span><span class="truncate">${esc(label)}</span><span class="material-symbols-outlined text-slate-400 text-[18px]">expand_more</span></summary><div role="menu" aria-label="모델 선택" class="absolute right-0 bottom-full z-[60] mb-2 w-72 max-w-[calc(100vw-24px)] rounded-xl border border-slate-200 bg-white p-2 shadow-xl"><p class="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400">사용 가능한 모델</p>${options || emptyState}<div class="mt-2 border-t border-slate-100 pt-2">${button('새로고침', 'models-refresh', loading || busy ? 'disabled' : '')}</div></div></details>`;
+  return `<details id="model-menu" class="relative"><summary aria-label="모델 선택: ${esc(label)}" class="list-none cursor-pointer flex max-w-[32vw] sm:max-w-[180px] items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"><span class="material-symbols-outlined text-indigo-600 text-[18px]">auto_awesome</span><span class="truncate">${esc(label)}</span><span class="material-symbols-outlined text-slate-400 text-[18px]">expand_more</span></summary><div role="menu" aria-label="모델 선택" class="absolute right-0 bottom-full z-[60] mb-2 w-72 max-w-[calc(100vw-24px)] rounded-xl border border-slate-200 bg-white p-2 shadow-xl"><p class="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400">사용 가능한 모델</p>${options || emptyState}<div class="mt-2 border-t border-slate-100 pt-2">${button('새로고침', 'models-refresh', loading || busy ? 'disabled' : '')}</div></div></details>`;
+}
+function reasoningEffortsFor(model) {
+  const metadata = (models.get(state.settings.provider) || []).find(item => item.id === model);
+  const advertised = metadata?.reasoning_efforts;
+  if (Array.isArray(advertised)) return advertised.filter(value => ['low', 'medium', 'high', 'xhigh'].includes(value));
+  const id = String(model || '').toLowerCase();
+  if (/^gpt-6(?:[.-]|$)/.test(id)) return ['low', 'medium', 'high', 'xhigh'];
+  if (/^gpt-5-pro(?:$|-)/.test(id)) return ['high'];
+  if (/^gpt-5\.1-codex-max(?:$|-)/.test(id)) return ['low', 'medium', 'high', 'xhigh'];
+  if (/^gpt-5\.1(?:$|-)/.test(id)) return ['low', 'medium', 'high'];
+  if (/^gpt-5(?:$|[.-])/.test(id) || /^o[1-9](?:$|[.-])/.test(id)) return ['low', 'medium', 'high'];
+  return [];
+}
+function reasoningPickerHtml(busy = false) {
+  const efforts = reasoningEffortsFor(currentChatModel());
+  if (!efforts.length) return '';
+  const requested = session?.reasoning_effort || 'high';
+  const selected = requested === 'auto' || efforts.includes(requested) ? requested : efforts.includes('high') ? 'high' : efforts[0];
+  const labels = { auto: '자동', low: '낮음', medium: '보통', high: '높음', xhigh: '매우 높음' };
+  return `<label class="chat-reasoning-control"><span>추론</span><select id="reasoning-effort" aria-label="추론 수준" title="추론 수준" ${busy ? 'disabled' : ''}>${['auto', ...efforts].map(value => `<option value="${value}" ${selected === value ? 'selected' : ''}>${labels[value]}</option>`).join('')}</select></label>`;
 }
 
 async function loadProject(projectId, sessionId) {
@@ -154,6 +189,7 @@ async function loadProject(projectId, sessionId) {
   if (session.id !== previousSession) {
     topics = detail.runs.find(r => r.context_usage)?.context_usage.topics || [];
     editor = null;
+    chatStickToBottom = true;
   }
   localStorage.setItem(`contextpulse.session.${projectId}`, session.id);
   if (!detail.runs.some(r => r.id === selectedRun)) selectedRun = detail.runs[0]?.id || null;
@@ -173,24 +209,27 @@ async function refresh() {
 }
 function startPolling() {
   clearInterval(poll);
-  if (!detail.runs.some(r => r.status === 'running')) return;
+  if (!hasRunWork(detail.runs)) return;
   const watching = session.id;
   poll = setInterval(async () => {
     try {
       const next = await api(`/sessions/${watching}`);
       if (session.id !== watching) return;
+      const previous = detail.runs;
+      const hadAssistantMessage = previous.some(run => run.assistant_message_id);
+      const previousRegistration = new Map(previous.map(run => [run.id, run.validation?.context_registration?.status]));
       detail = next;
-      if (!next.runs.some(r => r.status === 'running')) {
+      const registrationChanged = next.runs.some(run => previousRegistration.get(run.id) !== run.validation?.context_registration?.status);
+      if (!hasRunWork(next.runs)) {
         clearInterval(poll); poll = null; sending = false;
         state = await api('/state'); project = await api(`/projects/${project.project.id}`);
-        render();
-        const last = next.runs[0];
         await loadContextPreview(); render();
-        toast(last.status === 'failed' ? last.ui_error || last.error : last.purpose === 'analysis' ? last.validation?.note : last.ui_warning || last.validation?.context_warning || '답변과 호출별 컨텍스트를 저장했습니다.');
+        const last = next.runs.find(run => run.id === selectedRun) || next.runs[0];
+        toast(last?.status === 'failed' ? last.ui_error || last.error : last?.purpose === 'analysis' ? last.validation?.note : last?.validation?.context_registration?.status === 'failed' ? last.ui_registration_error || last.validation.context_registration.error : last?.ui_warning || last?.validation?.context_warning || '답변과 호출별 컨텍스트를 저장했습니다.');
       } else {
         const badge = $('#processing-status');
         if (badge) badge.textContent = progressLabel();
-        if (next.runs.some(r => r.assistant_message_id)) render();
+        if ((!hadAssistantMessage && next.runs.some(run => run.assistant_message_id)) || registrationChanged) render();
       }
     } catch (error) { clearInterval(poll); poll = null; sending = false; toast(error.message); }
   }, 1000);
@@ -202,7 +241,7 @@ function renderSessionList() {
     const untitled = ['\uc0c8 \ub300\ud654', 'New conversation'].includes(item.title);
     const title = untitled ? '새 대화' : item.title;
     const current = item.id === session.id;
-    return `<button type="button" data-session-id="${esc(item.id)}" aria-current="${current ? 'page' : 'false'}" title="${esc(title)}" class="sidebar-session"><span class="material-symbols-outlined">chat_bubble_outline</span><span class="sidebar-session-title">${esc(title)}</span></button>`;
+    return `<div class="sidebar-session-row"><button type="button" data-session-id="${esc(item.id)}" aria-current="${current ? 'page' : 'false'}" title="${esc(title)}" class="sidebar-session"><span class="material-symbols-outlined">chat_bubble_outline</span><span class="sidebar-session-title">${esc(title)}</span></button><button type="button" data-action="delete-session" data-session="${esc(item.id)}" aria-label="대화 삭제: ${esc(title)}" title="대화 삭제" class="sidebar-session-delete"><span class="material-symbols-outlined" aria-hidden="true">delete_outline</span></button></div>`;
   }).join('') : '<p class="sidebar-empty">대화가 없습니다.</p>';
 }
 function chatNeedsLogin() {
@@ -256,7 +295,7 @@ function renderShell() {
     delete settingsTab.dataset.consent;
     settingsTab.disabled = false;
     settingsTab.setAttribute('aria-label', 'ChatGPT 연결 안내');
-    settingsTab.title = 'ChatGPT 연결 안내';
+    settingsTab.removeAttribute('title');
     settingsTab.classList.remove('sidebar-login-tab');
     settingsTab.classList.add('sidebar-settings-tab');
     settingsTab.innerHTML = '<span class="material-symbols-outlined">info</span><span>ChatGPT 연결 안내</span>';
@@ -273,7 +312,7 @@ function renderShell() {
     }
     settingsTab.disabled = false;
     settingsTab.setAttribute('aria-label', pendingLogin ? '로그인 계속' : state.auth.signedIn ? '플랜 권한 승인' : 'ChatGPT 로그인');
-    settingsTab.title = pendingLogin ? '로그인 계속' : state.auth.signedIn ? '플랜 권한 승인' : 'ChatGPT 로그인';
+    settingsTab.removeAttribute('title');
     settingsTab.classList.remove('sidebar-settings-tab');
     settingsTab.classList.add('sidebar-login-tab');
     settingsTab.innerHTML = `<span class="material-symbols-outlined">${pendingLogin ? 'open_in_new' : 'login'}</span><span>${pendingLogin ? '로그인 계속' : state.auth.signedIn ? '플랜 권한 승인' : 'ChatGPT 로그인'}</span>`;
@@ -284,7 +323,7 @@ function renderShell() {
     delete settingsTab.dataset.consent;
     settingsTab.disabled = false;
     settingsTab.setAttribute('aria-label', '설정');
-    settingsTab.title = '설정';
+    settingsTab.removeAttribute('title');
     settingsTab.classList.remove('sidebar-login-tab');
     settingsTab.classList.add('sidebar-settings-tab');
     settingsTab.innerHTML = '<span class="material-symbols-outlined">tune</span><span>설정</span>';
@@ -315,8 +354,9 @@ function messageHtml(message) {
     <div class="chat-message-content">
       <div class="chat-message-heading"><span class="${ai ? 'chat-assistant-name' : 'chat-user-name'}">${ai ? 'ContextPulse' : '나'}</span></div>
       <div class="chat-message-bubble ${ai ? 'chat-assistant-bubble' : 'chat-user-bubble'}"><div class="message-body">${esc(message.content)}</div></div>
-      ${run ? `<div class="chat-run-meta">${pill(run.status === 'running' && run.assistant_message_id ? '검증 완료 · 맥락 자동 등록 중' : statusLabel[run.status], run.status === 'corrected' || run.status === 'consistent' ? 'green' : 'amber')}${run.provider === 'demo' ? pill('시연 · 모델 호출 없음', 'amber') : ''}${button('검증 기록', 'inspect', `data-run="${esc(run.id)}"`)}</div>` : ''}
+      ${run ? `<div class="chat-run-meta">${pill(statusLabel[run.status], run.status === 'corrected' || run.status === 'consistent' ? 'green' : run.status === 'unresolved' || run.status === 'failed' ? 'red' : run.status === 'uncertain' ? 'amber' : 'slate')}${registrationPill(run)}${run.provider === 'demo' ? pill('시연 · 모델 호출 없음', 'amber') : ''}${button('검증 기록', 'inspect', `data-run="${esc(run.id)}"`)}</div>` : ''}
       ${run?.validation?.context_warning ? `<p class="mt-2 text-xs text-amber-800">${esc(run.ui_warning || run.validation.context_warning)}</p>` : ''}
+      ${run?.validation?.context_registration?.status === 'failed' ? `<p class="mt-2 text-xs text-amber-800">${esc(run.ui_registration_error || run.validation.context_registration.error || '')}</p>` : ''}
       ${run?.validation?.note ? `<details class="mt-2 text-xs text-slate-500"><summary>검증 메모</summary><p class="mt-2">${esc(run.validation.note)}</p></details>` : ''}
       ${run ? usedContextHtml(run) : ''}
       ${run?.validation?.automatically_registered?.length ? `<p class="mt-2 text-xs text-emerald-700">맥락 ${run.validation.automatically_registered.length}개 자동 등록 · 원문과 함께 관리</p>` : ''}
@@ -331,35 +371,37 @@ function progressLabel() {
 function usedContextHtml(run) {
   const used = run.context_usage;
   if (!used) return `<p class="text-xs text-slate-500">이 답변의 전달 기록을 찾을 수 없습니다.</p>`;
-  const item = (value, label) => `<div class="p-3 bg-white rounded border border-slate-200 space-y-2"><div class="flex flex-wrap items-center gap-2 text-xs">${pill(label)}${value.version ? `<span>v${value.version}</span>` : ''}${value.title ? `<strong>${esc(value.title)}</strong>` : ''}${value.topics?.length ? `<span>${esc(value.topics.map(t => '#' + t).join(' '))}</span>` : ''}</div><p class="message-body text-sm">${esc(value.content)}</p>${value.selection_reason ? `<p class="text-xs text-slate-500">${esc(value.selection_reason)}</p>` : ''}${value.source_id ? button('원문 보기', 'source', `data-message="${esc(value.source_id)}"`) : ''}</div>`;
+  const item = (value, label) => `<div class="p-3 bg-white rounded border border-slate-200 space-y-2"><div class="flex flex-wrap items-center gap-2 text-xs">${pill(label)}${value.version ? `<span>v${value.version}</span>` : ''}${value.title ? `<strong>${esc(value.title)}</strong>` : ''}${value.topics?.length ? `<span>${esc(value.topics.map(t => '#' + t).join(' '))}</span>` : ''}</div><p class="message-body text-sm">${esc(value.content)}</p>${value.selection_reason ? `<p class="text-xs text-slate-500">${esc(value.selection_reason)}</p>` : ''}${value.retrieval?.matched_terms?.length ? `<p class="text-xs text-indigo-700">일치 키워드: ${esc(value.retrieval.matched_terms.join(' · '))}</p>` : ''}${value.source_id ? button('원문 보기', 'source', `data-message="${esc(value.source_id)}"`) : ''}</div>`;
   const topicItem = (value, included) => {
     const title = value.title || value.content?.slice(0, 64) || '내용 없음';
-    const label = value.entry_type === 'conversation' ? '대화에서 파악한 내용' : kindLabel[value.kind] || '참고 자료';
+    const label = value.entry_type === 'conversation' ? '대화에서 파악한 내용' : value.entry_type === 'history' ? (value.role === 'assistant' ? '이전 답변' : '이전 사용자 발화') : kindLabel[value.kind] || '참고 자료';
     return included
       ? `<div class="rounded border border-emerald-100 bg-white p-2.5 space-y-1.5"><div class="flex flex-wrap items-center gap-2 text-[11px]">${pill('요청 입력에 포함', 'green')}${pill(label)}${value.version ? `<span>v${value.version}</span>` : ''}<strong>${esc(title)}</strong></div><p class="text-xs text-slate-700">${esc(value.selection_reason || '이번 답변의 실제 요청 입력에 포함')}</p>${value.source_id ? button('원문 보기', 'source', `data-message="${esc(value.source_id)}"`) : ''}</div>`
       : `<details class="rounded border border-slate-200 bg-white p-2.5 text-[11px]"><summary class="cursor-pointer text-slate-700">제외 · ${esc(title)}${value.version ? ` · v${value.version}` : ''}</summary><div class="mt-2 space-y-2"><p class="message-body text-xs text-slate-600">${esc(value.content || '')}</p><p class="text-slate-500">${esc(value.selection_reason || '이번 요청 입력에는 포함되지 않음')}</p>${value.source_id ? button('원문 보기', 'source', `data-message="${esc(value.source_id)}"`) : ''}</div></details>`;
   };
 
   const includedCount = used.contexts.length + used.decisions.length + used.history.length;
-  const excludedCount = used.excluded_contexts.length + used.excluded_decisions.length;
+  const excludedCount = used.excluded_contexts.length + used.excluded_decisions.length + (used.excluded_history?.length || 0);
   return `<details class="answer-context rounded-xl border border-indigo-200 bg-indigo-50/70" data-context-run="${esc(run.id)}">
     <summary class="answer-context-summary"><span class="font-semibold">이번 답변에 전달된 컨텍스트</span><span class="text-xs font-normal text-slate-500">${countLabel(includedCount, '포함', 'items sent', 'item sent')} · ${countLabel(excludedCount, '제외', 'items excluded', 'item excluded')} · ${esc(used.model)}</span></summary>
     <div class="px-4 pb-4 space-y-4">
     <div class="flex flex-wrap gap-2 items-center justify-end border-b border-indigo-100 pb-3 text-xs text-slate-500">
-      <span>${esc(phaseLabel[used.phase] || used.phase)}</span>
+      <span>해당 답변 당시 전달 기록 · ${run.created_at ? esc(new Date(run.created_at).toLocaleString(DATE_LOCALE)) : ''} · ${esc(phaseLabel[used.phase] || used.phase)}</span>
     </div>
 
     <div class="space-y-2">
       <div class="flex flex-wrap items-center justify-between text-xs gap-2">
-        <span class="font-medium text-slate-700">질문에서 파악한 주제 · ${used.selection_mode === 'semantic' ? '의미 기반 선택' : '태그·규칙 기반 선택'}</span>
+        <span class="font-medium text-slate-700">질문에서 파악한 주제 · ${used.selection_mode === 'fts5' ? 'SQLite FTS5 키워드 검색' : used.selection_mode === 'semantic' ? '의미 기반 선택' : '태그·규칙 기반 선택'}</span>
         <div class="flex gap-1.5">
           ${pill(countLabel(used.contexts.length, '저장 컨텍스트 포함', 'stored contexts included', 'stored context included'), 'green')}
-          ${pill(countLabel(used.decisions.length, '대화 맥락 포함', 'conversation context included'))}
+          ${pill(countLabel(used.decisions.length, '대화에서 파악한 맥락', 'conversation-derived items included'))}
           ${pill(countLabel(used.excluded_contexts.length, '저장 컨텍스트 제외', 'stored contexts excluded', 'stored context excluded'))}
           ${pill(countLabel(used.excluded_decisions.length, '대화 맥락 제외', 'conversation context excluded'))}
+          ${(used.excluded_history?.length || 0) ? pill(countLabel(used.excluded_history.length, '이전 대화 제외', 'earlier dialogue excluded', 'earlier message excluded')) : ''}
         </div>
       </div>
       <div class="flex flex-wrap gap-1.5">${used.topics.length ? used.topics.map(topic => pill(`#${topic}`, 'indigo')).join('') : '<span class="text-xs text-slate-500">감지된 주제가 없습니다.</span>'}</div>
+      ${used.search ? `<p class="text-xs text-slate-500">SQLite FTS5 키워드·주제 점수 기준 ${Math.round(used.search.threshold * 100)}% · ${countLabel(used.search.candidates?.length || 0, '검색 후보', 'retrieval candidates', 'retrieval candidate')}</p>` : ''}
       ${used.selection_warning ? `<p class="rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">${esc(used.selection_warning)}</p>` : ''}
       ${used.topic_clusters?.length ? `
         <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5">
@@ -377,7 +419,7 @@ function usedContextHtml(run) {
               <div class="space-y-1.5 pt-1.5 border-t border-slate-100">
                 ${cluster.injected_items.map(it => topicItem(it, true)).join('')}
                 ${cluster.excluded_items.map(it => topicItem(it, false)).join('')}
-          ${!cluster.injected_items.length && !cluster.excluded_items.length ? '<p class="text-[11px] text-slate-500">이 주제에 연결된 저장 맥락이 없습니다.</p>' : ''}
+          ${!cluster.injected_items.length && !cluster.excluded_items.length ? '<p class="text-[11px] text-slate-500">이 주제의 저장 컨텍스트는 없습니다. 대화에서 파악한 맥락은 아래 항목에서 따로 확인하세요.</p>' : ''}
               </div>
             </div>
           `).join('')}
@@ -387,7 +429,7 @@ function usedContextHtml(run) {
           <span class="text-slate-600">질문에서 추론한 주제:</span>
           ${used.topics.map(t => pill(`#${t}`)).join('')}
           ${pill(countLabel(used.contexts.length, '저장 맥락', 'stored contexts', 'stored context'))}
-          ${pill(countLabel(used.decisions.length, '대화 맥락', 'conversation context entries', 'conversation context entry'))}
+          ${pill(countLabel(used.decisions.length, '대화에서 파악한 맥락', 'conversation-derived items', 'conversation-derived item'))}
           ${pill(countLabel(used.history.length, '이전 대화', 'earlier messages', 'earlier message'))}
         </div>
       `}
@@ -400,9 +442,9 @@ function usedContextHtml(run) {
       </div>
       <div class="space-y-2">
         ${used.current_question ? item(used.current_question, '이 답변의 질문 · 저장 맥락 아님') : ''}
-        ${used.contexts.map(c => item(c, kindLabel[c.kind] || '참고 자료')).join('')}
-        ${used.decisions.map(d => item(d, '사용자 대화에서 파악한 내용')).join('')}
-        ${used.history.map(h => item(h, h.role === 'user' ? '이전 사용자 발화' : '이전 답변')).join('')}
+        <section class="space-y-2"><h3 class="text-xs font-semibold text-slate-700">저장 컨텍스트 · ${used.contexts.length}개</h3>${used.contexts.map(c => item(c, kindLabel[c.kind] || '참고 자료')).join('') || '<p class="text-xs text-slate-500">이번 답변에 전달된 저장 컨텍스트가 없습니다.</p>'}</section>
+        <section class="space-y-2"><h3 class="text-xs font-semibold text-slate-700">대화에서 파악한 맥락 · ${used.decisions.length}개</h3>${used.decisions.map(d => item(d, '사용자 대화에서 파악한 내용')).join('') || '<p class="text-xs text-slate-500">이번 답변에 전달된 대화 기준이 없습니다.</p>'}</section>
+        <section class="space-y-2"><h3 class="text-xs font-semibold text-slate-700">이전 대화 · ${used.history.length}개</h3>${used.history.map(h => item(h, h.role === 'user' ? '이전 사용자 발화' : '이전 답변')).join('') || '<p class="text-xs text-slate-500">이번 답변에 이전 대화 메시지가 전달되지 않았습니다.</p>'}</section>
         ${!used.contexts.length && !used.decisions.length && !used.history.length ? '<p class="text-xs text-slate-500 bg-white p-2.5 rounded border border-slate-200">추가 맥락 없이 현재 질문만 전달했습니다.</p>' : ''}
       </div>
     </div>
@@ -419,6 +461,7 @@ function renderChat() {
   const previousTop = previousStream?.scrollTop || 0;
   const wasNearBottom = !previousStream || previousStream.scrollHeight - previousStream.scrollTop - previousStream.clientHeight < 100;
   const busy = sending || detail.runs.some(r => r.status === 'running');
+  const shouldStickToBottom = wasNearBottom || (busy && chatStickToBottom);
   const loginRequired = chatNeedsLogin();
   const failed = detail.runs.filter(r => r.status === 'failed');
   document.body.classList.add('chat-mode');
@@ -434,7 +477,7 @@ function renderChat() {
       <form id="chat-form" class="chat-composer">
         <p id="chat-model-guidance" class="chat-model-guidance">${loginRequired ? 'ChatGPT 로그인은 실제 모델 답변을 만들 때 필요합니다. 저장된 컨텍스트와 대화는 그대로 유지됩니다.' : currentChatModel() ? '대화 주제를 파악하고 관련 컨텍스트를 자동으로 찾아 답변에 반영합니다.' : '입력창에서 모델을 선택하면 바로 대화를 시작할 수 있습니다.'}</p>
         <textarea id="chat-input" aria-label="메시지" maxlength="4000" rows="1" class="chat-input" placeholder="${loginRequired ? 'ChatGPT 모델 연결 후 메시지 보내기' : '메시지 보내기'}" ${busy || loginRequired ? 'disabled' : ''}>${esc(draft)}</textarea>
-        <div class="chat-composer-toolbar"><span class="chat-composer-hint">${state.settings.provider === 'chatgpt' && state.auth.chatgptConnected ? '<a href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener noreferrer">ChatGPT 사용량</a> · ' : ''}⌘ / Ctrl + Enter 전송 · Enter 줄바꿈 · <span id="char-count">${draft.length}/4000</span></span><div class="chat-composer-actions"><div id="model-picker" class="${loginRequired ? 'hidden' : ''}"></div><button type="submit" class="chat-send" aria-label="보내기" title="보내기" ${busy || loginRequired || !currentChatModel() ? 'disabled' : ''}><span class="material-symbols-outlined">arrow_upward</span></button></div></div>
+        <div class="chat-composer-toolbar"><span class="chat-composer-hint">${state.settings.provider === 'chatgpt' && state.auth.chatgptConnected ? '<a href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener noreferrer">ChatGPT 사용량</a> · ' : ''}<span id="char-count">${draft.length}/4000</span></span><div class="chat-composer-actions"><div id="model-picker" class="${loginRequired ? 'hidden' : ''}"></div>${reasoningPickerHtml(busy)}<button type="submit" class="chat-send" aria-label="보내기" title="보내기" ${busy || loginRequired || !draft.trim() || !currentChatModel() ? 'disabled' : ''}><span class="material-symbols-outlined">arrow_upward</span></button></div></div>
       </form>
       <p class="chat-footer-note">답변 아래에서 실제로 전달된 컨텍스트와 원문 근거를 확인할 수 있습니다.</p>
     </div>
@@ -442,7 +485,19 @@ function renderChat() {
   <button type="button" id="chat-context-backdrop" class="chat-context-backdrop ${contextPanelOpen ? 'is-open' : ''}" data-action="close-context-panel" aria-label="컨텍스트 패널 닫기" tabindex="-1"></button>
   <aside id="chat-context-drawer" class="chat-context-drawer ${contextPanelOpen ? 'is-open' : ''}" role="complementary" aria-label="이번 대화의 컨텍스트" aria-hidden="${!contextPanelOpen}" ${contextPanelOpen ? '' : 'inert'}>${chatContextPanel()}</aside>`;
   const stream = $('#chat-stream');
-  if (stream && detail.messages.length) stream.scrollTop = wasNearBottom ? stream.scrollHeight : previousTop;
+  if (stream && detail.messages.length) {
+    stream.addEventListener('scroll', () => {
+      chatStickToBottom = stream.scrollHeight - stream.scrollTop - stream.clientHeight < 80;
+    }, { passive: true });
+    if (shouldStickToBottom) {
+      chatStickToBottom = true;
+      stream.scrollTop = stream.scrollHeight;
+      requestAnimationFrame(() => { if (stream.isConnected && chatStickToBottom) stream.scrollTop = stream.scrollHeight; });
+    } else {
+      chatStickToBottom = false;
+      stream.scrollTop = previousTop;
+    }
+  }
   renderModelPicker();
   $('#context-panel-toggle')?.setAttribute('aria-expanded', String(contextPanelOpen));
 }
@@ -451,7 +506,7 @@ function syncChatModelState() {
   if (guide) guide.textContent = chatNeedsLogin() ? 'ChatGPT 로그인은 실제 모델 답변을 만들 때 필요합니다. 저장된 컨텍스트와 대화는 그대로 유지됩니다.' : currentChatModel() ? '대화 주제를 파악하고 관련 컨텍스트를 자동으로 찾아 답변에 반영합니다.' : '입력창에서 모델을 선택하면 바로 대화를 시작할 수 있습니다.';
   const submit = $('#chat-form button[type="submit"]');
   const busy = sending || (detail?.runs || []).some(run => run.status === 'running');
-  if (submit) submit.disabled = chatNeedsLogin() || !currentChatModel() || busy;
+  if (submit) submit.disabled = chatNeedsLogin() || !currentChatModel() || busy || !draft.trim();
   const input = $('#chat-input');
   if (input) { input.disabled = chatNeedsLogin() || busy; input.placeholder = chatNeedsLogin() ? 'ChatGPT 모델 연결 후 메시지 보내기' : '메시지 보내기'; }
 }
@@ -477,8 +532,8 @@ function chatContextPanel() {
 
   const groups = Array.from(topicMap.values());
 
-  return `<div class="flex justify-between items-center gap-2"><h2 class="text-sm font-semibold">이번 대화의 컨텍스트</h2>${button('관리', 'contexts')}</div><p class="text-xs text-slate-500">주제 범위와 대화별 직접 설정을 기준으로 한 미리보기입니다. 의미 기반 자동 선택은 질문마다 수행하며 실제 결과는 답변 영수증에 기록합니다.</p>
-    ${lastSelectionHtml()}${candidatePanel(true)}<section class="space-y-3"><div class="flex justify-between text-xs font-medium text-slate-600"><span>주제·포함 설정 미리보기</span>${pill(countLabel(selected.length, '규칙상 포함', 'contexts included by rules', 'context included by rules'), 'green')}</div>
+  return `<div class="flex justify-between items-center gap-2"><h2 class="text-sm font-semibold">이번 대화의 컨텍스트</h2>${button('관리', 'contexts')}</div><p class="text-xs text-slate-500">질문 키워드를 SQLite FTS5로 검색하고 기준 점수 이상의 컨텍스트를 최대 8개 찾습니다. 대화별 직접 설정도 적용하며 실제 점수와 전달 내용은 답변 영수증에 기록합니다.</p>
+    ${lastSelectionHtml()}${candidatePanel(true)}<section class="space-y-3"><div class="flex justify-between text-xs font-medium text-slate-600"><span>현재 설정 미리보기 · 다음 답변 후보</span>${pill(countLabel(selected.length, '규칙상 포함', 'contexts included by rules', 'context included by rule'), 'green')}</div><p class="text-xs text-slate-500">저장된 주제와 포함 설정을 기준으로 한 현재 미리보기입니다. 다음 질문의 실제 검색 점수와 전달 여부는 답변이 끝난 뒤 해당 답변 영수증에 고정됩니다.</p>
     <div class="flex flex-wrap items-center gap-1.5 text-xs"><span class="text-slate-500">최근 답변 주제:</span>${topics.length ? topics.map(topic => pill(`#${topic}`, 'indigo')).join('') : '<span class="text-slate-500">아직 파악된 주제가 없습니다.</span>'}</div>
     ${groups.map(group => `
       <div class="rounded-xl border ${group.selected.length ? 'border-indigo-200 bg-white' : 'border-slate-200 bg-slate-100/60'} p-3 space-y-2.5">
@@ -522,27 +577,37 @@ function visibleContexts() {
   return project.contexts.filter(item => (contextStatus === 'all' || item.status === contextStatus) && (contextKind === 'all' || item.kind === contextKind) && (!query || [item.title, item.content, ...item.topics].join(' ').toLowerCase().includes(query)));
 }
 function candidatePanel(compact = false) {
+  const pending = project.candidates.filter(c => c.status === 'pending');
   const all = project.candidates.filter(c => c.status === 'accepted');
   const items = compact ? all.slice(0, 3) : all;
-  return `<section class="space-y-3"><div class="flex justify-between items-center"><h2 class="text-sm font-semibold">자동 등록 이력 · ${all.length}개</h2>${compact ? button('전체 보기', 'context-candidates') : ''}</div><p class="text-xs text-slate-500">사용자 발화와 모델 답변에서 원문을 확인해 맥락을 자동 등록합니다. 모델 제안은 가설로 유지합니다.</p>${items.map(item => `<article class="rounded-xl border border-emerald-200 bg-white p-4 space-y-3"><h3 class="text-sm font-semibold">${esc(item.title)}</h3>${pill(item.kind === 'decision' ? '사용자 대화에서 파악한 내용' : kindLabel[item.kind])}<blockquote class="message-body border-l-2 border-slate-300 pl-3 text-sm">${esc(item.content)}</blockquote><p class="text-xs text-slate-500">${item.scope === 'project' ? '프로젝트 전체' : item.topics.map(t => '#' + esc(t)).join(' ')} · ${esc(new Date(item.created_at).toLocaleString(DATE_LOCALE))}</p><div class="flex gap-2">${button('원문 보기', 'source', `data-message="${item.source_id}"`)}${button('추출 입력·결과', 'inspect', `data-run="${item.run_id}"`)}</div></article>`).join('') || '<p class="text-xs text-slate-500">아직 자동 등록된 맥락이 없습니다. 실제 모델을 연결하고 대화하면 등록됩니다.</p>'}</section>`;
+  const reviewCards = pending.map(item => `<article class="rounded-xl border border-amber-200 bg-amber-50/50 p-4 space-y-3"><div class="flex flex-wrap justify-between gap-2"><h3 class="text-sm font-semibold">${esc(item.title)}</h3>${pill('검토 중인 가설', 'amber')}</div><blockquote class="message-body border-l-2 border-amber-300 pl-3 text-sm">${esc(item.content)}</blockquote><p class="text-xs text-slate-500">모델 답변의 제안입니다. 승인하면 이후 관련 질문에 참고 자료로 전달됩니다. · ${item.topics.map(t => '#' + esc(t)).join(' ')}</p><div class="flex flex-wrap gap-2">${button('원문 보기', 'source', `data-message="${item.source_id}"`)}${button('승인하고 저장', 'review-candidate', `data-candidate="${item.id}" data-review="accept"`)}${button('무시', 'review-candidate', `data-candidate="${item.id}" data-review="dismiss"`)}</div></article>`).join('');
+  const history = items.map(item => `<article class="rounded-xl border border-emerald-200 bg-white p-4 space-y-3"><h3 class="text-sm font-semibold">${esc(item.title)}</h3>${pill(item.kind === 'decision' ? '사용자 대화에서 파악한 내용' : kindLabel[item.kind])}<blockquote class="message-body border-l-2 border-slate-300 pl-3 text-sm">${esc(item.content)}</blockquote><p class="text-xs text-slate-500">${item.scope === 'project' ? '프로젝트 전체' : item.topics.map(t => '#' + esc(t)).join(' ')} · ${esc(new Date(item.created_at).toLocaleString(DATE_LOCALE))}</p><div class="flex gap-2">${button('원문 보기', 'source', `data-message="${item.source_id}"`)}${button('추출 입력·결과', 'inspect', `data-run="${item.run_id}"`)}</div></article>`).join('');
+  if (compact) return `${pending.length ? `<section class="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3"><div class="flex justify-between items-center"><h3 class="text-xs font-semibold">검토할 모델 제안 ${pending.length}개</h3>${button('검토', 'context-candidates')}</div><p class="text-xs text-slate-600">승인 전에는 모델 답변의 가설을 저장 컨텍스트로 사용하지 않습니다.</p></section>` : ''}${all.length ? `<section class="space-y-2"><div class="flex justify-between items-center"><h3 class="text-xs font-semibold">자동 등록 이력 · ${all.length}개</h3>${button('전체 보기', 'context-candidates')}</div>${items.map(item => `<article class="rounded-lg border border-emerald-200 bg-white p-3 space-y-2"><div class="flex gap-2 items-center">${pill(item.kind === 'decision' ? '대화에서 파악한 내용' : kindLabel[item.kind])}<strong class="text-xs">${esc(item.title)}</strong></div><p class="message-body text-xs text-slate-600">${esc(item.content)}</p></article>`).join('')}</section>` : ''}`;
+  return `<section class="space-y-4"><div><h2 class="text-sm font-semibold">검토 대기 · ${pending.length}개</h2><p class="text-xs text-slate-500 mt-1">사용자 발화의 맥락은 자동 등록됩니다. 모델 답변의 제안은 가설 후보로 보관하며, 승인 전에는 답변에 전달하지 않습니다.</p></div>${reviewCards || '<p class="text-xs text-slate-500">검토할 모델 제안이 없습니다.</p>'}<div class="space-y-3 border-t border-slate-200 pt-4"><h2 class="text-sm font-semibold">등록 이력 · ${all.length}개</h2>${history || '<p class="text-xs text-slate-500">아직 자동 등록된 맥락이 없습니다. 대화하면 사용자 원문에서 유용한 맥락을 찾습니다.</p>'}</div></section>`;
+}
+function decisionPanel() {
+  const items = project.decisions || [];
+  const card = item => `<article class="rounded-xl border border-slate-200 bg-white p-4 space-y-3"><div class="flex flex-wrap items-center justify-between gap-2"><div class="flex gap-2 items-center">${pill(item.status === 'active' ? '사용 중' : item.status === 'archived' ? '보관됨' : '대체된 이전 버전', item.status === 'active' ? 'green' : 'slate')}${pill(item.scope === 'project' ? '프로젝트 전체' : item.topics.map(t => '#' + esc(t)).join(' '))}<span class="text-xs text-slate-500">v${item.version}</span></div>${item.status !== 'superseded' ? `<div class="flex gap-2">${button(item.status === 'active' ? '보관' : '복원', 'archive-decision', `data-decision="${item.id}" data-archived="${item.status === 'active'}"`)}${button('삭제', 'delete-decision', `data-decision="${item.id}"`)}</div>` : ''}</div><p class="message-body text-sm font-medium">${esc(item.content)}</p><div class="flex gap-2">${button('원문 보기', 'source', `data-message="${item.source_id}"`)}</div></article>`;
+  return `<section class="space-y-4"><div><h2 class="text-sm font-semibold">대화에서 파악한 내용 · ${items.length}개</h2><p class="text-xs text-slate-500 mt-1">사용자가 명시한 기준만 이 목록에 저장됩니다. 각 항목의 원문과 적용 범위를 확인하고, 더 이상 사용하지 않을 기준은 보관하거나 삭제할 수 있습니다.</p></div><div class="space-y-3">${items.map(card).join('') || '<p class="text-sm text-slate-500 rounded-lg border border-dashed border-slate-300 p-5">아직 등록된 사용자 기준이 없습니다.</p>'}</div></section>`;
 }
 function lastSelectionHtml() {
   const last = contextPreview.last_selection;
   if (!last) return '';
-  return `<section class="p-4 rounded-xl border border-indigo-200 bg-white space-y-3"><h3 class="text-sm font-semibold">최근 답변에 사용한 맥락</h3><p class="text-xs text-slate-500">${esc(last.question)} · ${last.mode === 'semantic' ? '질문 의미로 자동 선택' : last.mode === 'tag_fallback' ? '자동 선택 실패 · 태그 기준 사용' : '태그·수동 선택'}</p>${last.items.map(item => `<div class="text-xs space-y-1"><p class="font-semibold">${esc(item.title)} · v${item.version}</p><p class="text-indigo-600">${esc(item.selection_reason)}</p></div>`).join('') || '<p class="text-xs text-slate-500">사용한 참고 맥락 없음</p>'}${button('선택 입력·실제 전달 내용', 'inspect', `data-run="${last.run_id}"`)}</section>`;
+  const included = last.receipt?.included || {};
+  return `<section class="p-4 rounded-xl border border-indigo-200 bg-white space-y-3"><h3 class="text-sm font-semibold">해당 답변 당시 실제 전달 기록</h3><p class="text-xs text-slate-500">${esc(last.question)} · ${last.created_at ? esc(new Date(last.created_at).toLocaleString(DATE_LOCALE)) : ''} · ${last.mode === 'fts5' ? 'SQLite FTS5 키워드·주제 점수로 자동 선택' : last.mode === 'semantic' ? '질문 의미로 자동 선택' : last.mode === 'tag_fallback' ? '자동 선택 실패 · 태그 기준 사용' : '태그·수동 선택'}</p><p class="text-xs text-indigo-700">저장 컨텍스트 ${included.saved_contexts || 0}개 · 대화 맥락 ${included.conversation_contexts || 0}개 · 이전 메시지 ${included.previous_messages || 0}개</p>${last.items.map(item => `<div class="text-xs space-y-1"><p class="font-semibold">${esc(item.title)} · v${item.version}</p><p class="text-indigo-600">${esc(item.selection_reason)}</p></div>`).join('') || '<p class="text-xs text-slate-500">해당 답변에는 저장 컨텍스트가 전달되지 않았습니다.</p>'}${button('선택 입력·실제 전달 내용', 'inspect', `data-run="${last.run_id}"`)}</section>`;
 }
 function contextListHtml() {
   const items = visibleContexts();
-  return items.map(item => `<article class="bg-white border ${editor?.id === item.id ? 'border-indigo-300' : 'border-slate-200'} rounded-xl p-4 space-y-3"><div class="flex flex-wrap justify-between gap-2"><button type="button" data-action="edit-context" data-context="${item.id}" class="font-semibold text-sm text-left hover:text-indigo-700">${esc(item.title)}</button><div class="flex gap-1">${pill(kindLabel[item.kind], item.kind === 'hypothesis' ? 'amber' : 'slate')}${item.registration === 'automatic' ? pill('자동 등록', 'green') : ''}${item.status === 'archived' ? pill('보관됨') : ''}</div></div><p class="context-snippet text-sm text-slate-600">${esc(item.content)}</p><div class="flex flex-wrap gap-2 text-xs text-slate-500"><span>${item.scope === 'project' ? '프로젝트 전체' : item.topics.map(t => `#${esc(t)}`).join(' ')}</span><span>· ${includeLabel[item.include_mode]}</span><span>· v${item.version}</span></div><div class="flex flex-wrap gap-2">${button('편집', 'edit-context', `data-context="${item.id}"`)}${button('버전 이력', 'context-history', `data-context="${item.id}"`)}${item.source_id ? button('대화 원문', 'source', `data-message="${item.source_id}"`) : ''}${button(item.status === 'archived' ? '다시 사용' : '보관', 'archive-context', `data-context="${item.id}" data-archived="${item.status !== 'archived'}"`)}</div></article>`).join('') || `<div class="p-6 border border-dashed border-slate-300 rounded-xl text-sm text-slate-500">${project.contexts.length ? '검색 조건에 맞는 컨텍스트가 없습니다.' : '아직 컨텍스트가 없습니다. 대화하면 원문에서 자동 등록합니다.'}</div>`;
+  return items.map(item => `<article class="bg-white border ${editor?.id === item.id ? 'border-indigo-300' : 'border-slate-200'} rounded-xl p-4 space-y-3"><div class="flex flex-wrap justify-between gap-2"><button type="button" data-action="edit-context" data-context="${item.id}" class="font-semibold text-sm text-left hover:text-indigo-700">${esc(item.title)}</button><div class="flex gap-1">${pill(kindLabel[item.kind], item.kind === 'hypothesis' ? 'amber' : 'slate')}${item.registration === 'automatic' ? pill('자동 등록', 'green') : ''}${item.status === 'archived' ? pill('보관됨') : ''}</div></div><p class="context-snippet text-sm text-slate-600">${esc(item.content)}</p>${item.kind === 'background' ? '<p class="text-xs text-slate-500">배경 정보는 사용자 목표·역할·사실을 기록합니다. 프로젝트에서 반드시 지켜야 할 기준으로 처리하지 않습니다.</p>' : ''}<div class="flex flex-wrap gap-2 text-xs text-slate-500"><span>${item.scope === 'project' ? '프로젝트 전체' : item.topics.map(t => `#${esc(t)}`).join(' ')}</span><span>· ${includeLabel[item.include_mode]}</span><span>· v${item.version}</span></div><div class="flex flex-wrap gap-2">${button('편집', 'edit-context', `data-context="${item.id}"`)}${button('버전 이력', 'context-history', `data-context="${item.id}"`)}${item.source_id ? button('대화 원문', 'source', `data-message="${item.source_id}"`) : ''}${button(item.status === 'archived' ? '다시 사용' : '보관', 'archive-context', `data-context="${item.id}" data-archived="${item.status !== 'archived'}"`)}${button('삭제', 'delete-context', `data-context="${item.id}"`)}</div></article>`).join('') || `<div class="p-6 border border-dashed border-slate-300 rounded-xl text-sm text-slate-500">${project.contexts.length ? '검색 조건에 맞는 컨텍스트가 없습니다.' : '아직 컨텍스트가 없습니다. 대화하면 원문에서 자동 등록합니다.'}</div>`;
 }
 function renderContexts() {
   const tab = contextTab;
   $('#view').innerHTML = `<div class="p-4 md:p-6 space-y-5"><div class="flex flex-wrap justify-between gap-3 items-center"><div><h1 class="text-xl font-semibold">컨텍스트 관리</h1><p class="text-sm text-slate-500 mt-2">${esc(project.project.name)}의 배경·참고 자료와 대화에서 자동으로 찾은 맥락을 확인합니다.</p></div><div class="flex flex-wrap gap-2">${button('새 컨텍스트', 'new-context')}</div></div>
-  <div class="flex gap-5 border-b border-slate-200"><button type="button" data-action="context-materials" class="pb-3 text-sm ${tab === 'materials' ? 'border-b-2 border-indigo-600 text-indigo-700 font-semibold' : 'text-slate-500'}">배경·참고·가설 ${project.contexts.filter(c => c.status === 'active').length}</button><button type="button" data-action="context-candidates" class="pb-3 text-sm ${tab === 'candidates' ? 'border-b-2 border-indigo-600 text-indigo-700 font-semibold' : 'text-slate-500'}">자동 등록 이력 ${project.candidates.filter(c => c.status === 'accepted').length}</button></div>
-  ${tab === 'candidates' ? candidatePanel(false) : `<div class="grid grid-cols-1 xl:grid-cols-12 gap-5"><section class="xl:col-span-7 space-y-4"><div class="flex flex-wrap gap-2"><input id="context-search" aria-label="컨텍스트 검색" class="flex-1 min-w-0 rounded-lg border-slate-200 text-sm" placeholder="제목·내용·주제 검색" value="${esc(contextFilter)}"><select id="context-kind-filter" aria-label="컨텍스트 종류 필터" class="rounded-lg border-slate-200 text-sm"><option value="all">모든 종류</option>${Object.entries(kindLabel).map(([key, label]) => `<option value="${key}" ${contextKind === key ? 'selected' : ''}>${label}</option>`).join('')}</select><select id="context-status-filter" aria-label="컨텍스트 상태 필터" class="rounded-lg border-slate-200 text-sm">${[['active', '사용 중'], ['archived', '보관됨'], ['all', '모두']].map(([key, label]) => `<option value="${key}" ${contextStatus === key ? 'selected' : ''}>${label}</option>`).join('')}</select></div><div id="context-list" class="space-y-3">${contextListHtml()}</div></section><aside class="xl:col-span-5"><div class="context-editor">${contextEditorHtml()}</div></aside></div>`}</div>`;
+  <div class="flex flex-wrap gap-5 border-b border-slate-200"><button type="button" data-action="context-materials" class="pb-3 text-sm ${tab === 'materials' ? 'border-b-2 border-indigo-600 text-indigo-700 font-semibold' : 'text-slate-500'}">배경·참고·가설 ${project.contexts.filter(c => c.status === 'active').length}</button><button type="button" data-action="context-decisions" class="pb-3 text-sm ${tab === 'decisions' ? 'border-b-2 border-indigo-600 text-indigo-700 font-semibold' : 'text-slate-500'}">대화에서 파악한 내용 ${project.decisions.length}</button><button type="button" data-action="context-candidates" class="pb-3 text-sm ${tab === 'candidates' ? 'border-b-2 border-indigo-600 text-indigo-700 font-semibold' : 'text-slate-500'}">모델 제안 검토 ${project.candidates.filter(c => c.status === 'pending').length}</button></div>
+  ${tab === 'candidates' ? candidatePanel(false) : tab === 'decisions' ? decisionPanel() : `<div class="grid grid-cols-1 xl:grid-cols-12 gap-5"><section class="xl:col-span-7 space-y-4"><div class="flex flex-wrap gap-2"><input id="context-search" aria-label="컨텍스트 검색" class="flex-1 min-w-0 rounded-lg border-slate-200 text-sm" placeholder="제목·내용·주제 검색" value="${esc(contextFilter)}"><select id="context-kind-filter" aria-label="컨텍스트 종류 필터" class="rounded-lg border-slate-200 text-sm"><option value="all">모든 종류</option>${Object.entries(kindLabel).map(([key, label]) => `<option value="${key}" ${contextKind === key ? 'selected' : ''}>${label}</option>`).join('')}</select><select id="context-status-filter" aria-label="컨텍스트 상태 필터" class="rounded-lg border-slate-200 text-sm">${[['active', '사용 중'], ['archived', '보관됨'], ['all', '모두']].map(([key, label]) => `<option value="${key}" ${contextStatus === key ? 'selected' : ''}>${label}</option>`).join('')}</select></div><div id="context-list" class="space-y-3">${contextListHtml()}</div></section><aside class="xl:col-span-5"><div class="context-editor">${contextEditorHtml()}</div></aside></div>`}</div>`;
 }
 function contextEditorHtml() {
-  if (!editor) return `<section class="bg-white border border-slate-200 rounded-xl p-5 space-y-4"><h2 class="font-semibold">필요한 부분만 답변에 사용</h2><p class="text-sm text-slate-500 leading-relaxed">프로젝트 배경, 참고 자료, 검토 중인 가설을 분리해 관리합니다. 자동 관리가 켜져 있으면 모델이 질문과 각 항목의 내용을 비교해 필요한 자료를 선택합니다.</p><p class="text-sm text-slate-500 leading-relaxed">채팅에서 직접 포함하거나 제외할 수 있으며, 대화에서 파악한 맥락은 답변마다 실제 전달 내역에서 확인할 수 있습니다.</p>${project.contexts.length ? '<p class="text-xs text-indigo-600">목록에서 항목을 선택하면 내용과 적용 범위를 편집할 수 있습니다.</p>' : button('첫 컨텍스트 추가', 'new-context')}</section>`;
+  if (!editor) return `<section class="bg-white border border-slate-200 rounded-xl p-5 space-y-4"><h2 class="font-semibold">필요한 부분만 답변에 사용</h2><p class="text-sm text-slate-500 leading-relaxed">프로젝트 배경, 참고 자료, 검토 중인 가설을 분리해 관리합니다. SQLite FTS5가 질문 키워드 일치(70%)와 주제어 일치(30%)를 합산하며, 이는 의미 임베딩 유사도가 아닙니다. 기본 기준 50% 이상인 항목을 최대 8개까지 답변에 넣습니다.</p><p class="text-sm text-slate-500 leading-relaxed">채팅에서 직접 포함하거나 제외할 수 있으며, 대화에서 파악한 맥락은 답변마다 실제 전달 내역에서 확인할 수 있습니다.</p>${project.contexts.length ? '<p class="text-xs text-indigo-600">목록에서 항목을 선택하면 내용과 적용 범위를 편집할 수 있습니다.</p>' : button('첫 컨텍스트 추가', 'new-context')}</section>`;
   const item = editor;
   return `<section class="bg-white border border-slate-200 rounded-xl p-5 space-y-4"><div class="flex items-center justify-between"><h2 class="font-semibold">${item.id ? '컨텍스트 편집' : '새 컨텍스트'}</h2>${item.id ? pill(`v${item.version}`) : ''}</div><form id="context-form" class="space-y-4"><label class="block text-xs text-slate-600">제목<input name="title" required maxlength="120" class="block w-full rounded-lg border-slate-200 text-sm mt-1" placeholder="예: 사용자와 해결할 문제" value="${esc(item.title)}"></label><label class="block text-xs text-slate-600">종류<select name="kind" class="block w-full rounded-lg border-slate-200 text-sm mt-1">${Object.entries(kindLabel).map(([key, label]) => `<option value="${key}" ${item.kind === key ? 'selected' : ''}>${label}</option>`).join('')}</select></label><label class="block text-xs text-slate-600">내용<textarea name="content" required maxlength="30000" rows="8" class="block w-full rounded-lg border-slate-200 text-sm mt-1" placeholder="답변에 필요한 맥락을 적어주세요.">${esc(item.content)}</textarea></label><div class="grid grid-cols-2 gap-3"><label class="block text-xs text-slate-600">적용 범위<select name="scope" class="block w-full rounded-lg border-slate-200 text-sm mt-1"><option value="project" ${item.scope === 'project' ? 'selected' : ''}>프로젝트 전체</option><option value="topic" ${item.scope === 'topic' ? 'selected' : ''}>지정한 주제</option></select></label><label class="block text-xs text-slate-600">포함 방식<select name="include_mode" class="block w-full rounded-lg border-slate-200 text-sm mt-1">${Object.entries(includeLabel).map(([key, label]) => `<option value="${key}" ${item.include_mode === key ? 'selected' : ''}>${label}</option>`).join('')}</select></label></div><label class="block text-xs text-slate-600">주제<input name="topics" class="block w-full rounded-lg border-slate-200 text-sm mt-1" placeholder="제품, 평가기준 · 쉼표로 구분" value="${esc(item.topics.join(', '))}"></label><p class="text-xs text-slate-500">가설은 확정된 사실로 취급하지 않습니다. ‘항상 포함’은 이 프로젝트의 모든 대화에 포함합니다.</p>${item.source_id ? '<p class="text-xs text-indigo-600">대화 원문이 연결되어 있습니다. 편집 내용은 별도 버전으로 보관합니다.</p>' : ''}<div class="flex gap-2"><button class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium">${item.id ? '새 버전 저장' : '컨텍스트 저장'}</button>${button('닫기', 'close-editor')}</div></form></section>`;
 }
@@ -571,8 +636,9 @@ async function renderInspector() {
   const run = await api(`/runs/${runId}`);
   if (pageName !== 'inspector') return;
   selectedRun = runId;
-  $('#view').innerHTML = `${run.provider === 'demo' ? demoNotice() : ''}<div class="p-4 md:p-6 space-y-4"><div class="bg-white border border-slate-200 rounded-lg p-4 flex flex-wrap justify-between gap-3"><div class="space-y-2"><h1 class="text-lg font-semibold">답변별 실제 전달 컨텍스트</h1><select id="run-select" aria-label="답변 선택" class="text-xs rounded border-slate-200">${detail.runs.map(r => `<option value="${r.id}" ${r.id === run.id ? 'selected' : ''}>${esc(shortId(r.id))} · ${esc(statusLabel[r.status])}</option>`).join('')}</select> ${pill(run.status === 'running' && run.assistant_message_id ? '검증 완료 · 맥락 자동 등록 중' : statusLabel[run.status], run.status === 'failed' ? 'red' : 'slate')}<p class="text-xs text-slate-500">호출 당시 입력을 보존한 기록입니다. 모델 내부의 영향도나 주의 집중을 뜻하지 않습니다.</p></div><div class="flex gap-2 items-start">${button('단계별 보기', 'inspector-columns')}${button('입력 차이 비교', 'inspector-diff')}</div></div>
+  $('#view').innerHTML = `${run.provider === 'demo' ? demoNotice() : ''}<div class="p-4 md:p-6 space-y-4"><div class="bg-white border border-slate-200 rounded-lg p-4 flex flex-wrap justify-between gap-3"><div class="space-y-2"><h1 class="text-lg font-semibold">답변별 실제 전달 컨텍스트</h1><select id="run-select" aria-label="답변 선택" class="text-xs rounded border-slate-200">${detail.runs.map(r => `<option value="${r.id}" ${r.id === run.id ? 'selected' : ''}>${esc(shortId(r.id))} · ${esc(statusLabel[r.status])}</option>`).join('')}</select> ${pill(statusLabel[run.status], run.status === 'failed' ? 'red' : 'slate')}${registrationPill(run)}<p class="text-xs text-slate-500">답변 시각 ${run.created_at ? esc(new Date(run.created_at).toLocaleString(DATE_LOCALE)) : ''} · 상태는 결정 충돌 검증 결과이며, 아래 기록은 해당 답변 당시 모델에 전달한 입력입니다.</p></div><div class="flex gap-2 items-start">${button('단계별 보기', 'inspector-columns')}${button('입력 차이 비교', 'inspector-diff')}</div></div>
   ${run.validation?.context_warning ? `<p class="p-3 rounded bg-amber-50 text-amber-900 text-sm">${esc(run.ui_warning || run.validation.context_warning)}</p>` : ''}
+  ${run.validation?.context_registration?.status === 'failed' ? `<p class="p-3 rounded bg-amber-50 text-amber-900 text-sm">${esc(run.ui_registration_error || run.validation.context_registration.error || '')}</p>` : ''}
   ${run.error ? `<p class="p-3 rounded bg-rose-50 text-rose-800 text-sm">${esc(run.error)}<br>실패한 호출은 준비된 요청 본문을 기록하며, 제공자가 입력을 수신했는지는 보장하지 않습니다.</p>` : ''}
   ${inspectorMode === 'diff' ? compareControls(run) + '<div id="comparison-result"></div>' : `<div class="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-4 gap-4">${run.snapshots.map(snapshotCard).join('')}</div>`}
   <section class="bg-white border border-slate-200 rounded-lg p-4 space-y-3"><h2 class="font-semibold">선택한 답변의 원문 근거</h2><div class="space-y-2">${run.snapshots.flatMap(s => s.blocks.filter(b => b.source_id && (b.decision_id || b.context_id))).filter((b, i, all) => all.findIndex(x => x.source_id === b.source_id && x.version === b.version) === i).map(b => `<div class="flex flex-wrap gap-2 items-center text-xs"><span>${b.context_id ? '참고 맥락' : '대화에서 파악한 내용'} · v${b.version} · 원문 ${esc(shortId(b.source_id))}</span>${button('원문 보기', 'source', `data-message="${esc(b.source_id)}"`)}</div>`).join('') || '<p class="text-sm text-slate-500">연결된 대화 원문 없음</p>'}</div></section></div>`;
@@ -601,19 +667,60 @@ async function loadComparison() {
 function renderSettings() {
   const s = state.settings;
   $('#view').innerHTML = `<div class="p-4 md:p-6 space-y-5"><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-4"><div><h1 class="text-xl font-semibold">설정</h1><p class="mt-2 text-sm text-slate-600">언어와 저장 정보를 관리합니다.</p></div><label class="block max-w-sm rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">인터페이스 언어<select id="language-select" class="block mt-2 w-full rounded-lg border-slate-200 bg-white text-sm text-slate-800"><option value="en" ${LOCALE === 'en' ? 'selected' : ''}>English</option><option value="ko" ${LOCALE === 'ko' ? 'selected' : ''}>한국어</option></select></label><p class="text-xs text-slate-500">기록은 서버 저장소에 보존</p></section>${oauthSetupNoticeHtml()}<div class="grid grid-cols-1 xl:grid-cols-2 gap-5"><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
-  <form id="settings-form" class="space-y-3"><h2 class="font-semibold">컨텍스트 관리</h2><label class="flex gap-2 items-center text-sm"><input id="auto-context" type="checkbox" ${s.autoContext ? 'checked' : ''}>대화 맥락 자동 등록·질문별 의미 선택</label><p class="text-xs text-slate-500">사용자 발화와 모델 답변에서 맥락을 자동 등록합니다. 새 맥락은 현재 답변이 끝난 뒤 저장하고, 다음 관련 답변부터 활용합니다. 모델 제안은 가설로 분류합니다.</p><button class="bg-indigo-600 text-white rounded-lg px-4 py-2 text-sm">설정 저장</button></form><p class="text-xs text-slate-500">ChatGPT에 한 번 연결한 뒤 모델은 채팅 입력창에서 선택합니다. 인증 정보는 서버에 저장하며 호출 기록·내보내기에서 제외합니다.</p></section>
-  <div class="space-y-5"><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-3"><h2 class="font-semibold">저장소와 내보내기</h2><p class="text-sm text-slate-600">저장 용량 ${(state.storage_bytes / 1024).toFixed(1)} KB · 프로젝트 ${state.projects.length}개</p><div class="flex flex-wrap gap-2">${button('전체 기록 JSON 다운로드', 'export-json')}${button('실제 SQLite 다운로드', 'export-sqlite')}</div><p class="text-xs text-slate-500">대화 원문이 포함됩니다. 인증 정보는 제외합니다. 기록 삭제·가져오기는 아직 제공하지 않습니다.</p></section><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-3"><h2 class="font-semibold">검증 정책</h2><p class="text-sm text-slate-600">교정 최대 1회 · 재검증 1회<br>원문 인용 확인 후 교정<br>프로젝트 범위 분리<br>호출 당시 입력은 수정·덮어쓰기 금지</p><p class="text-xs text-slate-500">근거가 부족하거나 검증 응답이 올바르지 않으면 판단 보류로 표시합니다. 재검증 후에도 충돌하면 미해결로 남깁니다.</p></section><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-3"><h2 class="font-semibold">교정 흐름 시연</h2><p class="text-sm text-slate-600">별도 시연 프로젝트에서 대화의 맥락과 어긋난 초안 → 원문 확인 → 답변 수정 → 재검증을 확인합니다.</p>${button('새 시연 프로젝트 만들기', 'demo')}<p class="text-xs text-amber-800">시연은 실제 모델을 호출하지 않습니다. 일반 채팅의 의미 검증 성능을 입증하는 테스트가 아닙니다.</p></section></div></div></div>`;
+  <form id="settings-form" class="space-y-3"><h2 class="font-semibold">컨텍스트 관리</h2><label class="flex gap-2 items-center text-sm"><input id="auto-context" type="checkbox" ${s.autoContext ? 'checked' : ''}>대화 맥락 자동 등록·SQLite FTS5 검색</label><p class="text-xs text-slate-500">사용자 발화와 모델 답변에서 맥락을 자동 등록합니다. 새 맥락은 현재 답변이 끝난 뒤 저장하고, 다음 관련 답변부터 활용합니다. 모델 제안은 가설로 분류합니다. 질문과 저장 내용의 키워드 점수가 기준 이상인 항목을 최대 8개 선택합니다.</p><button class="bg-indigo-600 text-white rounded-lg px-4 py-2 text-sm">설정 저장</button></form><p class="text-xs text-slate-500">ChatGPT에 한 번 연결한 뒤 모델은 채팅 입력창에서 선택합니다. 인증 정보는 서버에 저장하며 호출 기록·내보내기에서 제외합니다.</p></section>
+  <div class="space-y-5"><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-3"><h2 class="font-semibold">저장소와 내보내기</h2><p class="text-sm text-slate-600">저장 용량 ${(state.storage_bytes / 1024).toFixed(1)} KB · 프로젝트 ${state.projects.length}개</p><div class="flex flex-wrap gap-2">${button('전체 기록 JSON 다운로드', 'export-json')}${button('실제 SQLite 다운로드', 'export-sqlite')}</div><p class="text-xs text-slate-500">대화 원문이 포함됩니다. 인증 정보는 제외합니다.</p></section><section class="bg-white border border-rose-200 rounded-xl p-5 space-y-3"><h2 class="font-semibold text-rose-800">저장 데이터 삭제</h2><p class="text-sm text-slate-600">모든 프로젝트, 대화, 결정, 컨텍스트, 답변과 모델 호출 기록을 이 저장소에서 영구 삭제합니다. 로그인 연결과 앱 설정은 유지됩니다.</p>${button('모든 대화와 컨텍스트 삭제', 'clear-all-data')}</section><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-3"><h2 class="font-semibold">검증 정책</h2><p class="text-sm text-slate-600">교정 최대 1회 · 재검증 1회<br>원문 인용 확인 후 교정<br>프로젝트 범위 분리<br>호출 당시 입력은 수정·덮어쓰기 금지</p><p class="text-xs text-slate-500">근거가 부족하거나 검증 응답이 올바르지 않으면 판단 보류로 표시합니다. 재검증 후에도 충돌하면 미해결로 남깁니다.</p></section><section class="bg-white border border-slate-200 rounded-xl p-5 space-y-3"><h2 class="font-semibold">교정 흐름 시연</h2><p class="text-sm text-slate-600">별도 시연 프로젝트에서 대화의 맥락과 어긋난 초안 → 원문 확인 → 답변 수정 → 재검증을 확인합니다.</p>${button('새 시연 프로젝트 만들기', 'demo')}<p class="text-xs text-amber-800">시연은 실제 모델을 호출하지 않습니다. 일반 채팅의 의미 검증 성능을 입증하는 테스트가 아닙니다.</p></section></div></div></div>`;
+}
+
+async function clearAllData() {
+  const message = '모든 프로젝트, 대화, 결정, 컨텍스트, 답변과 호출 기록을 영구 삭제합니다. 로그인과 앱 설정은 유지됩니다.';
+  if (!window.confirm(message)) return;
+  const phrase = LOCALE === 'ko' ? '삭제' : 'DELETE';
+  if (window.prompt(LOCALE === 'ko' ? '계속하려면 삭제를 입력하세요.' : 'Type DELETE to continue.') !== phrase) return;
+  const result = await api('/data', 'DELETE', {});
+  state = await api('/state');
+  selectedRun = null; editor = null; topics = []; contextPreview = { selected: [], excluded: [] };
+  await loadProject(result.project.id);
+  navigate('chat');
+  toast('모든 대화와 컨텍스트 기록을 삭제했습니다. 로그인과 앱 설정은 유지됩니다.');
+}
+async function deleteContextItem(contextId) {
+  const item = project.contexts.find(context => context.id === contextId);
+  if (!item) throw new Error('컨텍스트를 찾을 수 없습니다.');
+  if (!window.confirm('이 컨텍스트와 모든 버전을 삭제합니다. 원문 메시지는 채팅에 남으며 다시 자동 등록되지 않습니다. 다른 저장 항목이 같은 원문을 참조하는 경우 해당 항목은 계속 쓰일 수 있습니다. 과거 답변의 실제 전달 기록은 보존됩니다.')) return;
+  const result = await api(`/contexts/${contextId}`, 'DELETE', {});
+  if (editor && result.context_ids.includes(editor.id)) editor = null;
+  await refresh();
+  toast('컨텍스트와 모든 버전을 삭제했습니다. 과거 답변의 전달 기록은 유지됩니다.');
+}
+async function deleteDecisionItem(decisionId) {
+  if (!window.confirm('이 기준과 대체된 이전 버전을 모두 삭제합니다. 원문 메시지와 과거 답변의 실제 전달 기록은 보존됩니다. 같은 원문을 참조하는 다른 저장 항목은 계속 쓰일 수 있습니다.')) return;
+  await api(`/decisions/${decisionId}`, 'DELETE', {});
+  await refresh();
+  toast('기준과 모든 버전을 삭제했습니다. 과거 답변의 전달 기록은 유지됩니다.');
+}
+async function deleteConversation(sessionId) {
+  const item = project.sessions.find(candidate => candidate.id === sessionId);
+  if (!item) throw new Error('대화를 찾을 수 없습니다.');
+  if (!window.confirm('이 대화와 그 안의 메시지 및 답변·호출 기록을 삭제합니다. 이 대화에서 나온 컨텍스트와 기준의 모든 버전도 함께 삭제됩니다. 다른 대화의 과거 전달 기록은 보존됩니다. 마지막 대화라면 빈 대화를 새로 만듭니다.')) return;
+  const wasCurrent = session.id === sessionId;
+  const result = await api(`/sessions/${sessionId}`, 'DELETE', {});
+  if (wasCurrent) {
+    draft = ''; compare = null; selectedRun = null; editor = null;
+    await loadProject(result.project_id, result.replacement_session.id);
+    navigate('chat');
+  } else await refresh();
+  toast('대화를 삭제했습니다.');
 }
 async function sendMessage() {
   if (chatNeedsLogin()) { toast('왼쪽 아래에서 ChatGPT에 로그인하세요.'); return; }
   if (sending || detail.runs.some(r => r.status === 'running') || !draft.trim()) return;
+  chatStickToBottom = true;
   sending = true;
   try {
     const response = await api(`/sessions/${session.id}/messages`, 'POST', { content: draft, topics: [] });
     draft = ''; selectedRun = response.run_id || selectedRun;
     sending = false;
     await refresh();
-    const stream = $('#chat-stream'); if (stream) stream.scrollTo({ top: stream.scrollHeight, behavior: 'smooth' });
   } catch (error) { sending = false; toast(error.message); render(); }
 }
 async function syncConnection() {
@@ -684,7 +791,7 @@ document.addEventListener('submit', async event => {
   } catch (error) { toast(error.message); }
 });
 document.addEventListener('input', event => {
-  if (event.target.id === 'chat-input') { draft = event.target.value; $('#char-count').textContent = `${draft.length}/4000`; event.target.style.height = 'auto'; event.target.style.height = `${Math.min(event.target.scrollHeight, 220)}px`; }
+  if (event.target.id === 'chat-input') { draft = event.target.value; $('#char-count').textContent = `${draft.length}/4000`; event.target.style.height = 'auto'; event.target.style.height = `${Math.min(event.target.scrollHeight, 220)}px`; syncChatModelState(); }
   if (event.target.id === 'context-search') { contextFilter = event.target.value; $('#context-list').innerHTML = contextListHtml(); }
   if (event.target.closest('#context-form') && editor) {
     if (event.target.name === 'topics') editor.topics = topicValues(event.target.value);
@@ -692,7 +799,7 @@ document.addEventListener('input', event => {
   }
 });
 document.addEventListener('keydown', event => {
-  if (event.target.id === 'chat-input' && !event.isComposing && event.keyCode !== 229 && (event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); sendMessage(); }
+  if (event.target.id === 'chat-input' && event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229) { event.preventDefault(); sendMessage(); }
 });
 document.addEventListener('change', async event => {
   try {
@@ -702,6 +809,15 @@ document.addEventListener('change', async event => {
         sessionStorage.setItem('contextpulse.languageDraft', JSON.stringify({ sessionId: session.id, projectId: project.project.id, draft, topics, contextTab, editor, selectedRun, inspectorMode }));
         location.assign(routePath(pageName, nextLocale));
       }
+      return;
+    }
+    if (event.target.id === 'reasoning-effort') {
+      const previous = session.reasoning_effort || 'high';
+      try {
+        const result = await api(`/sessions/${session.id}/reasoning`, 'POST', { effort: event.target.value });
+        session = result.session; detail.session = session;
+        toast('이 대화의 추론 수준을 변경했습니다.');
+      } catch (error) { event.target.value = previous; throw error; }
       return;
     }
     if (event.target.id === 'context-kind-filter') { contextKind = event.target.value; $('#context-list').innerHTML = contextListHtml(); }
@@ -760,7 +876,7 @@ document.addEventListener('click', async event => {
       renderChat(); syncChatModelState(); toast('이 대화의 모델을 변경했습니다.'); return;
     }
     if (action === 'models-refresh') return await loadModelsForProvider(state.settings.provider, true);
-    if (['context-materials', 'context-candidates'].includes(action)) { contextTab = action.split('-')[1]; return navigate('contexts'); }
+    if (['context-materials', 'context-decisions', 'context-candidates'].includes(action)) { contextTab = action.split('-')[1]; return navigate('contexts'); }
     if (action === 'analyze-context') {
       target.disabled = true;
       const result = await api(`/sessions/${session.id}/analyze-context`, 'POST', {});
@@ -782,6 +898,13 @@ document.addEventListener('click', async event => {
       if (editor?.id === target.dataset.context) editor = null;
       await refresh(); toast(target.dataset.archived === 'true' ? '보관했습니다. 다음 호출부터 자동으로 제외됩니다.' : '다시 사용할 수 있도록 복원했습니다.'); return;
     }
+    if (action === 'archive-decision') {
+      await api(`/decisions/${target.dataset.decision}/archive`, 'POST', { archived: target.dataset.archived === 'true' });
+      await refresh(); toast(target.dataset.archived === 'true' ? '이 기준을 보관했습니다. 다음 답변부터 전달되지 않습니다.' : '이 기준을 복원했습니다. 관련 답변에 다시 적용됩니다.'); return;
+    }
+    if (action === 'delete-context') return await deleteContextItem(target.dataset.context);
+    if (action === 'delete-decision') return await deleteDecisionItem(target.dataset.decision);
+    if (action === 'delete-session') return await deleteConversation(target.dataset.session);
     if (action === 'context-override') {
       await api(`/sessions/${session.id}/context-selection`, 'POST', { context_id: target.dataset.context, mode: target.dataset.mode });
       await loadContextPreview(); renderChat(); toast('이 대화의 컨텍스트 선택을 저장했습니다.'); return;
@@ -814,6 +937,7 @@ document.addEventListener('click', async event => {
     }
     if (action === 'export-json') return download('/export', 'contextpulse-backup.json');
     if (action === 'export-sqlite') return download('/export/sqlite', 'contextpulse.sqlite');
+    if (action === 'clear-all-data') return await clearAllData();
     if (action === 'compare-previous') {
       const current = detail.runs.findIndex(r => r.id === selectedRun), previous = detail.runs[current + 1];
       if (!previous) throw new Error('이전 답변 기록이 없습니다.');

@@ -15,7 +15,7 @@ import { Auth } from './auth.js';
 import { Provider } from './provider.js';
 import { executeRun, compareSnapshots, selectMaterials } from './pipeline.js';
 import { systemText, systemMessage, interfaceLocale } from './localization.js';
-import { analyzeConversation } from './context-ai.js';
+import { analyzeConversation, archiveTransientAssistantHypotheses } from './context-ai.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const buildId = currentBuildId();
@@ -50,8 +50,9 @@ export function createApp({ port = 8899, directory = join(root, 'data'), fetcher
   const oauthAvailable = !hosted || supportsLoopbackChatGptOAuth(origin);
   const manager = hosted ? new WorkspaceManager(directory, origin, fetcher, workspaceOptions) : null;
   const localStore = hosted ? null : new Store(directory);
+  if (localStore) for (const project of localStore.projects()) archiveTransientAssistantHypotheses(localStore, project.id);
   const localAuth = hosted ? null : new Auth(directory, origin, fetcher);
-  const local = hosted ? null : { store: localStore, auth: localAuth, provider: new Provider(localAuth, fetcher), csrf: randomBytes(32).toString('hex'), busy: new Set(), inflight: 0 };
+  const local = hosted ? null : { store: localStore, auth: localAuth, provider: new Provider(localAuth, fetcher), csrf: randomBytes(32).toString('hex'), busy: new Set(), backgroundTasks: new Set(), inflight: 0 };
   const browserSessions = new Set();
   const cookieName = hosted ? 'contextpulse_visitor' : `contextpulse_session_${port}`;
   let draining = false;
@@ -93,11 +94,16 @@ export function createApp({ port = 8899, directory = join(root, 'data'), fetcher
         if (hosted && (busy.size >= 2 || manager.busyCount() >= 8)) throw Object.assign(new Error('Demo is busy. Please try again shortly.'), { status: 429 });
         if (hosted && (store.db.prepare('SELECT COUNT(*) n FROM messages').get().n >= 20000 || statSync(store.path).size > 128 * 1024 * 1024)) throw Object.assign(new Error('Visitor storage limit reached.'), { status: 429 });
       };
+      const requireDeletionIdle = (projectId) => {
+        requireIdle(projectId);
+        if (runtime.backgroundTasks.size) throw Object.assign(new Error('자동 컨텍스트 등록이 끝난 뒤 삭제할 수 있습니다.'), { status: 409 });
+      };
       const allowedProviders = oauthAvailable ? [...new Set(['chatgpt', ...(!hosted ? testOnlyProviders.filter(name => ['openai', 'ollama', 'demo'].includes(name)) : [])])] : [];
       const checkProvider = (name) => { if (!allowedProviders.includes(name)) throw Object.assign(new Error(oauthAvailable ? '이 연결 방식은 현재 사용할 수 없습니다. ChatGPT OAuth에 연결하세요.' : '이 사이트 주소에는 ChatGPT 로그인 클라이언트가 등록되지 않았습니다. 공개 사이트용 OpenAI 승인이 필요합니다.'), { status: 400 }); };
       const connectedSettings = (locale = 'en', session = null, requireModel = true) => {
         const settings = { ...store.settings(), locale }; checkProvider(settings.provider);
         if (session?.model && session.model_provider === settings.provider) settings.model = session.model;
+        settings.reasoningEffort = session?.reasoning_effort || 'high';
         if (requireModel && !settings.model) throw new Error('채팅 입력창에서 모델을 선택하세요.');
         if (settings.provider === 'chatgpt' && !auth.publicStatus().signedIn) throw new Error('설정에서 Continue with ChatGPT로 연결하세요.');
         if (settings.provider === 'chatgpt' && !auth.planEnabled()) throw new Error('ChatGPT 플랜 사용 권한을 승인하세요.');
@@ -107,6 +113,11 @@ export function createApp({ port = 8899, directory = join(root, 'data'), fetcher
       const publicState = () => ({ build_id: buildId, mode, capabilities: { providers: allowedProviders, oauth: oauthAvailable }, projects: store.projects(), settings: store.settings(), auth: auth.publicStatus(), busy: [...busy], csrf, storage_bytes: statSync(store.path).size + (existsSync(`${store.path}-wal`) ? statSync(`${store.path}-wal`).size : 0) });
       if (path === '/api/state' && req.method === 'GET') return json(publicState());
       if (path.startsWith('/api/') && req.headers['x-contextpulse-token'] !== csrf) return json({ error: '앱을 새로고침한 뒤 다시 시도하세요.', code: 'CSRF_RELOAD' }, 403);
+      if (path === '/api/data' && req.method === 'DELETE') {
+        if (busy.size || runtime.backgroundTasks.size) throw Object.assign(new Error('진행 중인 답변과 자동 등록이 끝난 뒤 데이터를 삭제할 수 있습니다.'), { status: 409 });
+        const project = store.clearAllData(locale);
+        return json({ project, projects: store.projects() });
+      }
       if (!oauthAvailable && ((path.startsWith('/api/auth/') && path !== '/api/auth/status') || path === '/auth/callback')) return json({ error: '이 사이트 주소에는 ChatGPT 로그인 클라이언트가 등록되지 않았습니다.' }, 400);
       if (path === '/auth/callback' && req.method === 'GET') {
         let message, destination = 'settings'; const callbackLocale = auth.pending.get(url.searchParams.get('state'))?.locale || 'en';
@@ -127,14 +138,36 @@ export function createApp({ port = 8899, directory = join(root, 'data'), fetcher
         if (!project) return json({ error: '프로젝트를 찾을 수 없습니다.' }, 404);
         return json({ project, sessions: store.sessions(project.id), decisions: store.decisions(project.id), contexts: store.contexts(project.id), candidates: store.candidates(project.id) });
       }
+      const decisionArchiveRoute = path.match(/^\/api\/decisions\/([^/]+)\/archive$/);
+      if (decisionArchiveRoute && req.method === 'POST') {
+        const decision = store.decision(decisionArchiveRoute[1]);
+        if (!decision) return json({ error: '결정을 찾을 수 없습니다.' }, 404);
+        requireIdle(decision.project_id);
+        const data = await body(req);
+        if (typeof data.archived !== 'boolean') throw new Error('보관 여부를 지정하세요.');
+        return json(store.archiveDecision(decision.id, data.archived));
+      }
+      const decisionDeleteRoute = path.match(/^\/api\/decisions\/([^/]+)$/);
+      if (decisionDeleteRoute && req.method === 'DELETE') {
+        const decision = store.decision(decisionDeleteRoute[1]);
+        if (!decision) return json({ error: '결정을 찾을 수 없습니다.' }, 404);
+        requireDeletionIdle(decision.project_id);
+        return json(store.deleteDecision(decision.id));
+      }
       if (path === '/api/sessions' && req.method === 'POST') {
         const data = await body(req); requireIdle(data.project_id); return json(store.createSession(data.project_id, locale), 201);
       }
       const sessionRoute = path.match(/^\/api\/sessions\/([^/]+)$/);
+      if (sessionRoute && req.method === 'DELETE') {
+        const session = store.session(sessionRoute[1]);
+        if (!session) return json({ error: '대화를 찾을 수 없습니다.' }, 404);
+        requireDeletionIdle(session.project_id);
+        return json(store.deleteSession(session.id, locale));
+      }
       if (sessionRoute && req.method === 'GET') {
         const session = store.session(sessionRoute[1]);
         if (!session) return json({ error: '대화를 찾을 수 없습니다.' }, 404);
-        return json({ session, messages: store.messages(session.id).map(m => m.role === 'system' ? { ...m, content: systemMessage(m.content, locale) } : m), runs: store.runs(session.id).map(run => ({ ...run, context_usage: contextUsage(store.run(run.id), locale), ui_warning: systemText(run.validation?.context_warning, locale), ui_error: systemText(run.error, locale), progress: run.status === 'running' ? (() => { const last = store.run(run.id).snapshots.at(-1); return last ? { phase: last.phase, completed: last.call_status === 'completed' } : null; })() : null })) });
+        return json({ session, messages: store.messages(session.id).map(m => m.role === 'system' ? { ...m, content: systemMessage(m.content, locale) } : m), runs: store.runs(session.id).map(run => ({ ...run, context_usage: contextUsage(store.run(run.id), locale), ui_warning: systemText(run.validation?.context_warning, locale), ui_registration_error: systemText(run.validation?.context_registration?.error, locale), ui_error: systemText(run.error, locale), progress: run.status === 'running' ? (() => { const last = store.run(run.id).snapshots.at(-1); return last ? { phase: last.phase, completed: last.call_status === 'completed' } : null; })() : null })) });
       }
       const sessionModelRoute = path.match(/^\/api\/sessions\/([^/]+)\/model$/);
       if (sessionModelRoute && req.method === 'POST') {
@@ -145,6 +178,15 @@ export function createApp({ port = 8899, directory = join(root, 'data'), fetcher
         const settings = connectedSettings(locale, session, false);
         store.setSessionModel(session.id, settings.provider, model);
         return json({ session: store.session(session.id) });
+      }
+      const sessionReasoningRoute = path.match(/^\/api\/sessions\/([^/]+)\/reasoning$/);
+      if (sessionReasoningRoute && req.method === 'POST') {
+        const session = store.session(sessionReasoningRoute[1]);
+        if (!session) return json({ error: '대화를 찾을 수 없습니다.' }, 404);
+        requireIdle(session.project_id);
+        connectedSettings(locale, session, false);
+        const { effort } = await body(req);
+        return json({ session: store.setSessionReasoningEffort(session.id, effort) });
       }
       const contextCollection = path.match(/^\/api\/projects\/([^/]+)\/contexts$/);
       const contextRoute = path.match(/^\/api\/contexts\/([^/]+)$/);
@@ -159,6 +201,12 @@ export function createApp({ port = 8899, directory = join(root, 'data'), fetcher
       if (contextRoute && req.method === 'GET') {
         const item = store.context(contextRoute[1]);
         return item ? json({ context: item, versions: store.contextVersions(item.id) }) : json({ error: '컨텍스트를 찾을 수 없습니다.' }, 404);
+      }
+      if (contextRoute && req.method === 'DELETE') {
+        const item = store.context(contextRoute[1]);
+        if (!item) return json({ error: '컨텍스트를 찾을 수 없습니다.' }, 404);
+        requireDeletionIdle(item.project_id);
+        return json(store.deleteContext(item.id));
       }
       const archiveRoute = path.match(/^\/api\/contexts\/([^/]+)\/archive$/);
       if (archiveRoute && req.method === 'POST') {
@@ -178,7 +226,8 @@ export function createApp({ port = 8899, directory = join(root, 'data'), fetcher
         const latest = store.runs(session.id).find(r => r.purpose === 'chat' && r.status !== 'running' && r.status !== 'failed');
         const generation = latest && store.run(latest.id).snapshots.find(s => s.phase === 'generation');
         const selection = generation?.blocks.find(b => b.key === 'CONTEXT_SELECTION');
-        const last_selection = generation ? { run_id: latest.id, question: store.message(latest.user_message_id).content, mode: selection ? JSON.parse(selection.content).mode : 'tags', items: generation.blocks.filter(b => b.context_id).map(b => ({ ...JSON.parse(b.content), id: b.context_id })) } : null;
+        const receiptBlock = generation?.blocks.find(b => b.key === 'CONTEXT_RECEIPT');
+        const last_selection = generation ? { run_id: latest.id, created_at: latest.created_at, question: store.message(latest.user_message_id).content, mode: selection ? JSON.parse(selection.content).mode : 'tags', receipt: receiptBlock ? JSON.parse(receiptBlock.content) : null, items: generation.blocks.filter(b => b.context_id).map(b => ({ ...JSON.parse(b.content), id: b.context_id })) } : null;
         return json({ ...materials, decisions, last_selection });
       }
       const overrideRoute = path.match(/^\/api\/sessions\/([^/]+)\/context-selection$/);
@@ -222,13 +271,18 @@ export function createApp({ port = 8899, directory = join(root, 'data'), fetcher
         const settings = connectedSettings(locale, session);
         const message = store.addMessage(session.id, 'user', content, topics);
         busy.add(session.project_id);
-        const task = executeRun(store, provider, session.id, message, { ...settings });
+        const task = executeRun(store, provider, session.id, message, {
+          ...settings,
+          backgroundContextRegistration: true,
+          onContextRegistrationStart: runId => runtime.backgroundTasks.add(runId),
+          onContextRegistrationEnd: runId => runtime.backgroundTasks.delete(runId)
+        });
         const run = store.runs(session.id).find(r => r.user_message_id === message.id);
         task.finally(() => busy.delete(session.project_id)).catch(() => {});
         return json({ message, run_id: run.id }, 202);
       }
       const runRoute = path.match(/^\/api\/runs\/([^/]+)$/);
-      if (runRoute && req.method === 'GET') { const run = store.run(runRoute[1]); return run ? json({ ...run, context_usage: contextUsage(run, locale), ui_warning: systemText(run.validation?.context_warning, locale), ui_error: systemText(run.error, locale) }) : json({ error: '답변 기록을 찾을 수 없습니다.' }, 404); }
+      if (runRoute && req.method === 'GET') { const run = store.run(runRoute[1]); return run ? json({ ...run, context_usage: contextUsage(run, locale), ui_warning: systemText(run.validation?.context_warning, locale), ui_registration_error: systemText(run.validation?.context_registration?.error, locale), ui_error: systemText(run.error, locale) }) : json({ error: '답변 기록을 찾을 수 없습니다.' }, 404); }
       if (path === '/api/compare' && req.method === 'GET') {
         const all = [url.searchParams.get('leftRun'), url.searchParams.get('rightRun')].map(r => store.run(r));
         const left = all[0]?.snapshots.find(s => s.id === url.searchParams.get('left'));
@@ -323,9 +377,9 @@ export function createApp({ port = 8899, directory = join(root, 'data'), fetcher
     draining = true;
     const stopped = new Promise(resolve => server.close(resolve)); server.closeIdleConnections();
     const deadline = Date.now() + 30_000;
-    while ((hosted ? manager.busyCount() : local.busy.size) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 50));
+    while ((hosted ? manager.busyCount() : local.busy.size + local.backgroundTasks.size) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 50));
     // Do not close a DB beneath a provider call. Interrupted runs recover on restart.
-    if (hosted ? manager.busyCount() : local.busy.size) return false;
+    if (hosted ? manager.busyCount() : local.busy.size + local.backgroundTasks.size) return false;
     await stopped;
     hosted ? manager.close() : localStore.close(); return true;
   };

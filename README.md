@@ -21,11 +21,16 @@ See the [current prototype scope](docs/project-summary.md) and [Colosseum submis
 - Sign in once with ChatGPT from the lower-left sidebar, then choose a model in the chat composer.
 - Keep the selected model when navigating, refreshing, or reconnecting the same account.
 - Store references, background, and hypotheses with topic and project scopes.
-- Identify topics automatically from each question; no topic input is required. Select relevant context by question meaning while retaining manual choices.
+- Search, archive, restore, or delete individual context items and their version history.
+- Identify topics automatically, then use SQLite FTS5 keyword matches and a visible score threshold to retrieve up to eight relevant context items. Chat-specific choices and always-included items are retained.
 - Generate a draft, validate it against original conversation evidence, correct a conflict once, and revalidate.
 - Show the topic, stored context, conversation context, and earlier messages sent for each answer directly below that answer.
 - Compare immutable request bodies across stages or answers, and inspect original sources.
-- Automatically register useful context from user messages and assistant responses without save buttons. Assistant proposals remain topic-scoped hypotheses. Exact source quotes are checked before any registration.
+- Automatically register useful context from user messages without save buttons. Assistant proposals remain topic-scoped hypotheses in a review queue and are not sent to later answers until approved. Exact source quotes are checked before registration.
+- Manage user-stated conversation criteria separately: inspect the original source, archive, restore, or delete a full criterion chain.
+- Delete an individual conversation with its messages, answers, call records, and context derived from that conversation; an empty chat is created if it was the last one.
+- Delete all projects, conversations, context, decisions, answers, and model-call records from Settings while retaining sign-in and app preferences.
+- Follow the message language and repair a detectable language or exact-list-count mismatch once before showing the answer.
 - Display the answer after validation while automatic registration finishes, with language-specific stage progress.
 
 ## Connecting a model
@@ -36,9 +41,11 @@ Sign in once with ChatGPT using the lower-left sidebar button. After sign-in, se
 
 Original messages, versioned context, automatic-registration candidates, and model-call snapshots are stored in `data/contextpulse.sqlite`. Credentials are held separately in a server-only local file with restrictive permissions, and are excluded from exports. OS keychain integration is not implemented. Local mode stays bound to loopback. Hosted mode uses isolated visitor databases and encrypts each visitor's OAuth credentials; see the deployment guide.
 
-The user-facing prototype does not expose a separate decision-management screen or a manual decision-registration checkbox. Conversation criteria are kept as internal evidence for validation and are shown as conversation context inside each answer receipt. See [the current project summary](docs/project-summary.md) for the product scope and demo flow.
+Conversation criteria have their own tab inside Context manager, with source evidence and archive/restore/delete controls. Assistant-generated hypotheses wait for approval before becoming searchable context. Deleting a context or criterion keeps immutable receipts for past answers. See [the current project summary](docs/project-summary.md) for the product scope and demo flow.
 
 “Context sent” is a receipt of the actual preserved request inputs; it does not measure model attention or prove how much an input influenced the answer. Editing a context item does not change earlier receipts. The fixed correction demo is labeled and makes no model calls. Real-world detection accuracy has not been benchmarked.
+
+Automatic context retrieval uses SQLite FTS5 over context titles, content, and topic labels. It ranks keyword matches with BM25 and applies a transparent keyword/topic coverage score and threshold; it does not use embeddings or semantic search, so synonyms and paraphrases without shared terms can be missed. The receipt records the search terms, score details, threshold, and contexts actually sent.
 
 English and Korean application copy and prompts are separate. Original user messages and historical model outputs are preserved, so they may be in either language.
 

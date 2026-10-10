@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Store } from '../src/store.js';
-import { executeRun } from '../src/pipeline.js';
+import { answerFormatIssues, executeRun } from '../src/pipeline.js';
 import { contextUsage } from '../src/context-usage.js';
 import { Provider, buildRequest } from '../src/provider.js';
 import { createApp } from '../src/server.js';
@@ -25,12 +25,29 @@ test('model preference is saved per conversation and isolated from other session
   assert.equal(store.session(other.id).model_provider, '');
 });
 
+test('reasoning effort is saved per conversation and model requests use the selected effort', t => {
+  const { store, project, session } = fixture(t);
+  const other = store.createSession(project.id);
+  assert.equal(session.reasoning_effort, 'high');
+  const updated = store.setSessionReasoningEffort(session.id, 'xhigh');
+  assert.equal(updated.reasoning_effort, 'xhigh');
+  assert.equal(store.session(other.id).reasoning_effort, 'high');
+  assert.throws(() => store.setSessionReasoningEffort(session.id, 'unlimited'));
+  const request = buildRequest({ provider: 'chatgpt', model: 'gpt-6.1-sol', reasoningEffort: 'xhigh', verbosity: 'high' }, 'Answer fully.', []);
+  assert.deepEqual(request.payload.reasoning, { effort: 'xhigh' });
+  assert.deepEqual(request.payload.text, { verbosity: 'high' });
+  const automatic = buildRequest({ provider: 'chatgpt', model: 'gpt-6.1-sol', reasoningEffort: 'auto', verbosity: 'high' }, 'Answer fully.', []);
+  assert.equal('reasoning' in automatic.payload, false);
+  assert.deepEqual(automatic.payload.text, { verbosity: 'high' });
+});
+
 test('chat model endpoint persists a selection without changing another conversation', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'contextpulse-session-model-'));
   const port = 24820 + Math.floor(Math.random() * 300);
-  const requestedModels = [];
+  const requestedModels = [], requestedPayloads = [];
   const app = createApp({ directory, port, testOnlyProviders: ['openai'], fetcher: async (_url, options) => {
-    requestedModels.push(JSON.parse(options.body).model);
+    const payload = JSON.parse(options.body);
+    requestedModels.push(payload.model); requestedPayloads.push(payload);
     const text = requestedModels.length === 1 ? 'Answer from this chat model.' : JSON.stringify({ verdict: 'consistent', conflicts: [], note: 'No conflict.' });
     return new Response(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ content: [{ type: 'output_text', text }] }], usage: { input_tokens: 1, output_tokens: 1 } } })}\n\n`, { headers: { 'Content-Type': 'text/event-stream' } });
   } });
@@ -41,12 +58,15 @@ test('chat model endpoint persists a selection without changing another conversa
   const call = async (path, data) => (await fetch(`${app.origin}/api${path}`, { headers, method: data ? 'POST' : 'GET', ...(data ? { body: JSON.stringify(data) } : {}) })).json();
   const project = app.store.projects()[0], first = app.store.sessions(project.id)[0], second = app.store.createSession(project.id);
   await call('/settings', { provider: 'openai', model: '', apiKey: 'fixture-session-model-key', autoContext: false });
-  const selected = await call(`/sessions/${first.id}/model`, { model: 'model-for-first-chat' });
+  const selected = await call(`/sessions/${first.id}/model`, { model: 'gpt-6.1-sol' });
   assert.equal(selected.session.model_provider, 'openai');
-  assert.equal(selected.session.model, 'model-for-first-chat');
+  assert.equal(selected.session.model, 'gpt-6.1-sol');
+  const reasoning = await call(`/sessions/${first.id}/reasoning`, { effort: 'xhigh' });
+  assert.equal(reasoning.session.reasoning_effort, 'xhigh');
   const other = await call(`/sessions/${second.id}`);
   assert.equal(other.session.model, '');
   assert.equal(other.session.model_provider, '');
+  assert.equal(other.session.reasoning_effort, 'high');
   assert.equal((await call('/state')).settings.model, '');
   const sent = await call(`/sessions/${first.id}/messages`, { content: 'Use this conversation model.', topics: [] });
   assert.equal(sent.run_id !== undefined, true);
@@ -57,8 +77,46 @@ test('chat model endpoint persists a selection without changing another conversa
     await new Promise(resolve => setTimeout(resolve, 10));
   }
   assert.equal(run.status, 'no_decisions');
-  assert.ok(run.snapshots.every(snapshot => snapshot.model === 'model-for-first-chat'));
-  assert.deepEqual(requestedModels, ['model-for-first-chat']);
+  assert.ok(run.snapshots.every(snapshot => snapshot.model === 'gpt-6.1-sol'));
+  assert.deepEqual(requestedModels, ['gpt-6.1-sol']);
+  assert.deepEqual(requestedPayloads[0].reasoning, { effort: 'xhigh' });
+  assert.deepEqual(requestedPayloads[0].text, { verbosity: 'high' });
+});
+
+test('generation input states included and excluded context counts without leaking excluded content', async t => {
+  const { store, project, session } = fixture(t);
+  store.saveContext(project.id, { title: 'Robot background', content: 'Build a robot that pulls weeds.', kind: 'background', scope: 'project', topics: [], include_mode: 'auto' });
+  store.saveContext(project.id, { title: 'Private unrelated note', content: 'Excluded material secret.', kind: 'reference', scope: 'topic', topics: ['food'], include_mode: 'auto' });
+  store.register(session.id, 'For this project, build a robot that pulls weeds.', [], { scope: 'project', locale: 'en' });
+  store.addMessage(session.id, 'user', 'We discussed a small farm robot earlier.', ['robot']);
+  const question = store.addMessage(session.id, 'user', 'Show the context used for this answer.', ['robot']);
+  const run = await executeRun(store, null, session.id, question, { provider: 'demo', model: 'context-demo', locale: 'en', autoContext: false });
+  const generation = run.snapshots.find(snapshot => snapshot.phase === 'generation');
+  const receipt = JSON.parse(generation.blocks.find(block => block.key === 'CONTEXT_RECEIPT').content);
+  const instructions = generation.blocks.find(block => block.key === 'INSTRUCTIONS').content;
+  assert.deepEqual(receipt.included, { saved_contexts: 1, conversation_contexts: 1, previous_messages: 1 });
+  assert.deepEqual(receipt.excluded, { saved_contexts: 1, conversation_contexts: 0, previous_messages: 0 });
+  assert.equal(receipt.excluded_content_sent, false);
+  assert.match(instructions, /enumerate every content-bearing DECISION, CONTEXT, and HISTORY block/i);
+  assert.match(instructions, /State clearly when zero saved contexts were used/i);
+  assert.equal(contextUsage(run, 'en').current_question.content, question.content);
+  assert.ok(generation.payload.includes('Build a robot that pulls weeds.'));
+  assert.ok(!generation.payload.includes('Excluded material secret.'));
+});
+
+test('an aspiration mistakenly stored as a project decision is filtered by topic and shown as excluded history', async t => {
+  const { store, session } = fixture(t);
+  const goal = store.register(session.id, '실제 로봇이 잡초를 뽑아주는 기능을 하는 걸 만들고 싶어', ['로봇'], { scope: 'project' });
+  const question = store.addMessage(session.id, 'user', '설정 화면에서 추론 수준을 바꾸고 싶어', ['설정']);
+  const run = await executeRun(store, null, session.id, question, { provider: 'demo', model: 'context-demo', locale: 'ko', autoContext: false });
+  const generation = run.snapshots.find(snapshot => snapshot.phase === 'generation');
+  const usage = contextUsage(run, 'ko');
+  const receipt = JSON.parse(generation.blocks.find(block => block.key === 'CONTEXT_RECEIPT').content);
+  assert.equal(generation.blocks.some(block => block.decision_id === goal.decision.id), false);
+  assert.equal(generation.blocks.some(block => block.key === `HISTORY:${goal.message.id}`), false);
+  assert.deepEqual(receipt.excluded, { saved_contexts: 0, conversation_contexts: 0, previous_messages: 1 });
+  assert.equal(usage.excluded_history.length, 1);
+  assert.equal(usage.excluded_history[0].content, goal.message.content);
 });
 
 test('answer context shows the versions actually sent and survives edits, archive and decision replacement', async t => {
@@ -135,7 +193,7 @@ test('English receipts localize older selector reasons and do not label project 
   assert.equal(projectDecisions[0].selection_reason, 'Superseded decision · History preserved');
 });
 
-test('validated answer and receipt are available while candidate extraction is still running', async t => {
+test('background registration releases the completed answer while extraction continues', async t => {
   const { store, session } = fixture(t);
   let release, extractionStarted;
   const waiting = new Promise(r => { extractionStarted = r; });
@@ -143,19 +201,114 @@ test('validated answer and receipt are available while candidate extraction is s
   const provider = { call: async request => {
     const instruction = request.payload.messages[0].content;
     if (instruction.startsWith('사용자 대화 원문')) { extractionStarted(); await gate; return { text: '{"candidates":[]}' }; }
-    if (instruction.startsWith('질문에 필요한')) return { text: '{"topics":[],"contexts":[]}' };
+    if (instruction.includes('SQLite FTS5')) return { text: '{"topics":[],"registrations":[]}' };
     return { text: 'ANSWER_READY' };
   } };
   const question = store.addMessage(session.id, 'user', 'test', []);
-  const task = executeRun(store, provider, session.id, question, { provider: 'ollama', model: 'test', ollamaUrl: 'http://127.0.0.1:11434', autoContext: true });
+  const backgroundTasks = new Set();
+  const task = executeRun(store, provider, session.id, question, { provider: 'ollama', model: 'test', ollamaUrl: 'http://127.0.0.1:11434', autoContext: true, backgroundContextRegistration: true, onContextRegistrationStart: id => backgroundTasks.add(id), onContextRegistrationEnd: id => backgroundTasks.delete(id) });
   await waiting;
   const running = store.run(store.runs(session.id)[0].id);
-  assert.equal(running.status, 'running');
+  assert.equal(running.status, 'no_decisions');
   assert.equal(store.message(running.assistant_message_id).content, 'ANSWER_READY');
+  assert.equal(running.validation.context_registration.status, 'running');
+  assert.deepEqual([...backgroundTasks], [running.id]);
   assert.ok(contextUsage(running));
-  release(); const completed = await task;
+  const completed = await task;
   assert.equal(completed.assistant_message_id, running.assistant_message_id);
   assert.equal(completed.status, 'no_decisions');
+  release();
+  for (let tries = 0; tries < 30 && store.run(running.id).validation.context_registration.status === 'running'; tries++) await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(store.run(running.id).validation.context_registration.status, 'completed');
+  assert.equal(backgroundTasks.size, 0);
+});
+
+test('answer language follows the current message instead of the interface route', async t => {
+  const { store, session } = fixture(t);
+  for (const [message, locale, instruction] of [
+    ['오늘 계획을 함께 정리해줘', 'en', /사용자의 현재 질문과 같은 언어로 답한다/],
+    ['Help me plan my day', 'ko', /Answer the current question in the same language as the user/],
+  ]) {
+    const question = store.addMessage(session.id, 'user', message, []);
+    const run = await executeRun(store, { call: async () => ({ text: 'A useful answer.' }) }, session.id, question, { provider: 'openai', model: 'test', locale, autoContext: false });
+    const prompt = run.snapshots.find(snapshot => snapshot.phase === 'generation').blocks.find(block => block.key === 'INSTRUCTIONS').content;
+    assert.match(prompt, instruction);
+  }
+});
+
+test('answer format checker catches a language mismatch and an extra requested list item', () => {
+  assert.deepEqual(answerFormatIssues('기능 세 가지를 알려줘', 'Three features are useful.').issues, ['language', 'count:3:0']);
+  assert.deepEqual(answerFormatIssues('기능을 세 가지 알려줘', '1. 첫째\n2. 둘째\n3. 셋째\n추가로 네 번째도 고려하세요.').issues, ['extra_suggestion']);
+  assert.deepEqual(answerFormatIssues('List 3 features', '1. One\n2. Two\n3. Three').issues, []);
+});
+
+test('a format repair retries a wrong-language answer with the exact requested item count', async t => {
+  const { store, session } = fixture(t);
+  const question = store.addMessage(session.id, 'user', '기능 세 가지를 번호로 알려줘.', []);
+  const phases = [];
+  const provider = { call: async request => {
+    const instructions = request.payload.messages[0].content;
+    if (instructions.includes('아래 초안의 내용과 근거는 바꾸지 말고')) {
+      phases.push('format_correction');
+      return { text: '1. 예약 시간 선택\n2. 진료 항목 입력\n3. 예약 확인 알림', latency: 0 };
+    }
+    phases.push('generation');
+    return { text: '1. Booking management\n2. Clinic search\n3. Payment\n4. Ratings\nAdditionally, add a social feed.', latency: 0 };
+  } };
+  const run = await executeRun(store, provider, session.id, question, { provider: 'ollama', model: 'test', autoContext: false });
+  assert.deepEqual(phases, ['generation', 'format_correction']);
+  assert.deepEqual(run.snapshots.map(snapshot => snapshot.phase), ['generation', 'format_correction']);
+  assert.equal(store.message(run.assistant_message_id).content, '1. 예약 시간 선택\n2. 진료 항목 입력\n3. 예약 확인 알림');
+  assert.equal(run.validation.format_repair.accepted, true);
+  assert.equal(run.validation.format_repair.expected_count, 3);
+});
+
+test('HTTP accepts a follow-up while automatic context registration is still running', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'contextpulse-background-http-'));
+  const port = 25200 + Math.floor(Math.random() * 500);
+  let releaseFirstExtraction, firstExtractionStarted, extractionCount = 0;
+  const gate = new Promise(resolve => { releaseFirstExtraction = resolve; });
+  const waiting = new Promise(resolve => { firstExtractionStarted = resolve; });
+  const app = createApp({ directory, port, testOnlyProviders: ['ollama'], fetcher: async (_url, options) => {
+    const request = JSON.parse(options.body), instructions = request.messages[0].content;
+    let output = 'A useful answer.';
+    if (instructions.includes('SQLite FTS5')) output = JSON.stringify({ topics: ['제품'], registrations: [] });
+    if (request.messages[1].content.includes('[EXTRACTION_SCOPE]')) {
+      extractionCount++;
+      if (extractionCount === 1) { firstExtractionStarted(); await gate; }
+      output = JSON.stringify({ candidates: [] });
+    }
+    return Response.json({ done: true, message: { content: output } });
+  } });
+  await new Promise(resolve => app.server.listen(port, '127.0.0.1', resolve));
+  t.after(async () => { releaseFirstExtraction(); await app.close(); rmSync(directory, { recursive: true, force: true }); });
+  const initial = await fetch(`${app.origin}/api/state`), cookie = initial.headers.get('set-cookie').split(';')[0], state = await initial.json();
+  const headers = { 'Content-Type': 'application/json', 'X-ContextPulse-Token': state.csrf, Cookie: cookie };
+  const request = async (path, data) => {
+    const response = await fetch(`${app.origin}/api${path}`, { headers, method: data ? 'POST' : 'GET', ...(data ? { body: JSON.stringify(data) } : {}) });
+    return { status: response.status, value: await response.json() };
+  };
+  await request('/settings', { provider: 'ollama', model: 'test', ollamaUrl: 'http://127.0.0.1:11434', autoContext: true });
+  const session = app.store.sessions(state.projects[0].id)[0];
+  const first = await request(`/sessions/${session.id}/messages`, { content: '첫 번째 답변을 해줘', topics: [] });
+  assert.equal(first.status, 202);
+  await waiting;
+  let detail;
+  for (let tries = 0; tries < 50; tries++) {
+    detail = (await request(`/sessions/${session.id}`)).value;
+    if (detail.runs[0]?.assistant_message_id) break;
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  assert.ok(detail.runs[0].assistant_message_id);
+  assert.notEqual(detail.runs[0].status, 'running');
+  assert.equal(detail.runs[0].validation.context_registration.status, 'running');
+  const preview = (await request(`/sessions/${session.id}/context-preview`, { topics: [] })).value;
+  assert.equal(preview.last_selection.run_id, first.value.run_id);
+  assert.equal(preview.last_selection.created_at, detail.runs[0].created_at);
+  assert.deepEqual(preview.last_selection.receipt.included, { saved_contexts: 0, conversation_contexts: 0, previous_messages: 0 });
+  const followUp = await request(`/sessions/${session.id}/messages`, { content: '바로 이어서 두 번째 질문', topics: [] });
+  assert.equal(followUp.status, 202);
+  releaseFirstExtraction();
 });
 
 test('provider policy and limit diagnostics survive storage without exposing bearer credentials', async t => {
@@ -202,14 +355,16 @@ test('selection explicitly separates allowed context IDs from recent message IDs
   const question = store.addMessage(session.id, 'user', 'test', []);
   for (const locale of ['en', 'ko']) {
     await chooseContext(store, session.id, question, async (phase, instruction, blocks) => {
-      assert.equal(blocks.find(b => b.key === 'CANDIDATE_IDS').content, '[]');
-      assert.ok(instruction.includes('CANDIDATE_IDS'));
+      assert.ok(blocks.some(b => b.key === 'CURRENT_QUESTION' && b.content === question.content));
+      assert.ok(blocks.some(b => b.key === 'RECENT_DIALOGUE'));
+      assert.ok(!blocks.some(b => b.key === 'CANDIDATE_IDS'));
+      assert.ok(instruction.includes('SQLite FTS5'));
       if (locale === 'en') {
         assert.ok(!/[가-힣]/.test(instruction));
-        assert.match(instruction, /with a short inclusion or exclusion reason in English/);
+        assert.match(instruction, /The application uses SQLite FTS5 scores/);
       }
-      if (locale === 'ko') assert.match(instruction, /짧은 선택·제외 이유를 한국어로 적는다/);
-      return '{"topics":[],"contexts":[]}';
+      if (locale === 'ko') assert.match(instruction, /짧은 후속 질문의 주제를 파악할 때 참고한다/);
+      return '{"topics":[],"registrations":[]}';
     }, locale);
   }
 });
@@ -237,7 +392,7 @@ test('automatic topics route previous messages without any manually supplied top
   let currentTopic = 'Product';
   const provider = { call: async request => {
     const instruction = request.payload.messages[0].content;
-    if (instruction.startsWith('질문에 필요한')) return { text: JSON.stringify({ topics: [currentTopic], contexts: [product, design].map(c => ({ id: c.id, include: c.topics.includes(currentTopic), reason: 'Question meaning' })) }) };
+    if (instruction.includes('SQLite FTS5')) return { text: JSON.stringify({ topics: [currentTopic], registrations: [] }) };
     if (instruction.startsWith('사용자 대화 원문')) return { text: '{"candidates":[]}' };
     return { text: currentTopic + ' answer' };
   } };
@@ -275,14 +430,13 @@ test('a delayed selection excludes later messages; frozen receipts never borrow 
   assert.deepEqual(contextUsage(store.run(run.id)), frozen);
 });
 
-test('user facts and assistant proposals register without buttons and feed only subsequent answers', async t => {
+test('user facts register automatically while assistant proposals wait for review', async t => {
   const { store, project, session, directory } = fixture(t);
   const question = store.addMessage(session.id, 'user', 'Our audience is independent developers.', []);
   const provider = { call: async request => {
     const instruction = request.payload.messages[0].content;
-    if (instruction.startsWith('질문에 필요한')) {
-      const candidates = store.contexts(project.id);
-      return { text: JSON.stringify({ topics: ['Product'], contexts: candidates.map(c => ({ id: c.id, include: true, reason: 'Audience context' })) }) };
+    if (instruction.includes('SQLite FTS5')) {
+      return { text: JSON.stringify({ topics: ['Product'], registrations: [] }) };
     }
     if (instruction.startsWith('사용자 대화 원문')) {
       const answer = store.messages(session.id).find(m => m.role === 'assistant');
@@ -299,14 +453,16 @@ test('user facts and assistant proposals register without buttons and feed only 
   assert.deepEqual(first.snapshots.map(snapshot => snapshot.phase), ['generation', 'extraction']);
   assert.equal(frozen.contexts.length, 0);
   assert.equal(first.snapshots.find(snapshot => snapshot.phase === 'generation').blocks.some(block => block.context_id), false);
-  assert.equal(store.contexts(project.id).length, 2);
+  assert.equal(store.contexts(project.id).length, 1);
   assert.ok(store.contexts(project.id).every(c => c.registration === 'automatic' && c.run_id === first.id));
+  assert.equal(store.candidates(project.id).filter(c => c.status === 'pending').length, 1);
   assert.equal(store.decisions(project.id).length, 0);
-  const secondQuestion = store.addMessage(session.id, 'user', 'How should we interview them?', []);
+  const secondQuestion = store.addMessage(session.id, 'user', 'How should we interview independent developers?', []);
   const second = await executeRun(store, provider, session.id, secondQuestion, settings);
-  assert.equal(contextUsage(second).contexts.length, 2);
+  assert.equal(contextUsage(second).contexts.length, 1);
   assert.deepEqual(contextUsage(store.run(first.id)), frozen);
-  assert.equal(store.contexts(project.id).length, 2); // exact-source deduplication
+  assert.equal(store.contexts(project.id).length, 1); // exact-source deduplication; assistant hypotheses remain pending.
+  assert.equal(store.candidates(project.id).filter(c => c.status === 'pending').length, 1);
   assert.ok(!readFileSync(new URL('../src/client.js', import.meta.url), 'utf8').includes("button('컨텍스트로 저장'"));
 });
 
@@ -317,13 +473,11 @@ test('a first-turn answer stays context-free while both sides of the conversatio
   const phases = [];
   const provider = { call: async request => {
     const instruction = request.payload.messages[0].content;
-    if (instruction.startsWith('질문에 필요한')) {
+    if (instruction.includes('SQLite FTS5')) {
       phases.push('selection');
       const latest = store.messages(session.id).filter(message => message.role === 'user').at(-1);
-      const candidates = store.contexts(project.id);
       return { text: JSON.stringify({
         topics: ['개발 진로'],
-        contexts: candidates.map(item => ({ id: item.id, include: true, reason: '개발 진로에 관련된 정보' })),
         // Reproduce a selector that proposes saving the current utterance.
         registrations: [{ title: '현재 질문', content: latest.content, kind: 'background', scope: 'topic', topics: ['개발 진로'], source_id: latest.id, supersedes: null }]
       }) };
@@ -350,7 +504,8 @@ test('a first-turn answer stays context-free while both sides of the conversatio
   assert.equal(contextUsage(first).contexts.length, 0);
   assert.equal(first.snapshots.find(snapshot => snapshot.phase === 'generation').blocks.some(block => block.context_id), false);
   assert.match(store.message(first.assistant_message_id).content, /작은 웹 프로젝트/);
-  assert.equal(store.contexts(project.id).length, 2); // User background and assistant proposal are stored after the answer.
+  assert.equal(store.contexts(project.id).length, 1); // User background is stored; the assistant proposal awaits review.
+  assert.equal(store.candidates(project.id).filter(item => item.status === 'pending').length, 1);
 
   const next = store.addMessage(session.id, 'user', secondQuestion, []);
   phases.length = 0;
@@ -359,7 +514,41 @@ test('a first-turn answer stays context-free while both sides of the conversatio
   assert.deepEqual(phases, ['selection', 'generation', 'extraction']);
   assert.ok(generation.blocks.some(block => block.context_id && block.source_id === firstQuestion.id));
   assert.ok(!generation.blocks.some(block => block.context_id && block.source_id === next.id));
-  assert.equal(store.contexts(project.id).length, 4); // The second turn's user and assistant context are saved for following turns.
+  assert.equal(store.contexts(project.id).length, 2); // User-origin context is saved; model proposals remain pending.
+  assert.equal(store.candidates(project.id).filter(item => item.status === 'pending').length, 2);
+});
+
+test('one-off activity-order advice stays in chat history and old automatic hypotheses are archived', async t => {
+  const { store, project, session } = fixture(t);
+  const study = store.addMessage(session.id, 'user', '친구와 스터디카페에서 공부하기로 했어.', ['친구와 스터디카페에서 공부']);
+  const meal = store.addMessage(session.id, 'user', '내일 엄마와 식사하기로 했어.', ['내일 엄마와 식사']);
+  const durable = [
+    store.saveContext(project.id, { title: '친구와 스터디카페에서 공부', content: study.content, kind: 'background', scope: 'topic', topics: ['친구와 스터디카페에서 공부'], include_mode: 'auto', source_id: study.id, registration: 'automatic' }),
+    store.saveContext(project.id, { title: '내일 엄마와 식사하기', content: meal.content, kind: 'background', scope: 'topic', topics: ['내일 엄마와 식사'], include_mode: 'auto', source_id: meal.id, registration: 'automatic' })
+  ];
+  const orderQuestion = store.addMessage(session.id, 'user', '친구랑 스카 먼저 가는 게 좋을까, 밥 먼저 먹는 게 좋을까?', ['친구와 스터디카페에서 공부', '내일 엄마와 식사']);
+  const oldAdvice = store.addMessage(session.id, 'assistant', '공부와 식사 순서 제안: 스터디카페에 먼저 갔다가 식사하세요.', ['친구와 스터디카페에서 공부', '내일 엄마와 식사']);
+  const transient = store.saveContext(project.id, { title: '공부와 식사 순서 제안', content: oldAdvice.content, kind: 'hypothesis', scope: 'topic', topics: ['친구와 스터디카페에서 공부', '내일 엄마와 식사'], include_mode: 'auto', source_id: oldAdvice.id, registration: 'automatic' });
+  const question = store.addMessage(session.id, 'user', '그럼 어떤 순서로 하는 게 좋을까?', ['친구와 스터디카페에서 공부', '내일 엄마와 식사']);
+  const provider = { call: async request => {
+    const instruction = request.payload.messages[0].content;
+    if (instruction.includes('SQLite FTS5')) return { text: JSON.stringify({ topics: ['친구와 스터디카페에서 공부', '내일 엄마와 식사'], registrations: [] }) };
+    if (instruction.startsWith('사용자 대화 원문')) {
+      const answer = store.messages(session.id).filter(message => message.role === 'assistant').at(-1);
+      return { text: JSON.stringify({ candidates: [
+        { title: '예전 순서 제안', content: oldAdvice.content, kind: 'hypothesis', scope: 'topic', topics: ['친구와 스터디카페에서 공부'], source_id: oldAdvice.id },
+        { title: '이번 순서 제안', content: answer.content, kind: 'hypothesis', scope: 'topic', topics: ['친구와 스터디카페에서 공부'], source_id: answer.id }
+      ] }) };
+    }
+    return { text: '스터디카페에서 공부한 뒤 식사하면 이동을 한 번에 정리할 수 있어요.' };
+  } };
+  const run = await executeRun(store, provider, session.id, question, { provider: 'ollama', model: 'test', autoContext: true });
+  const generation = run.snapshots.find(snapshot => snapshot.phase === 'generation');
+  assert.equal(store.context(transient.id).status, 'archived');
+  assert.equal(store.contexts(project.id).filter(item => item.status === 'active').length, 2);
+  assert.ok(durable.every(item => store.context(item.id).status === 'active'));
+  assert.ok(!generation.blocks.some(block => block.context_id === transient.id));
+  assert.equal(store.contexts(project.id).filter(item => item.status === 'active' && item.kind === 'hypothesis').length, 0);
 });
 
 test('a revised criterion is registered during selection and validated in the current answer', async t => {
@@ -368,7 +557,7 @@ test('a revised criterion is registered during selection and validated in the cu
   const question = store.addMessage(session.id, 'user', 'In this project, evaluate accuracy first instead of speed.', []);
   const provider = { call: async request => {
     const instruction = request.payload.messages[0].content;
-    if (instruction.startsWith('질문에 필요한')) return { text: JSON.stringify({ topics: ['Evaluation'], contexts: [], registrations: [{ title: 'Revised criterion', content: question.content, kind: 'decision', scope: 'project', topics: ['Evaluation'], source_id: question.id, supersedes: previous.id }] }) };
+    if (instruction.includes('SQLite FTS5')) return { text: JSON.stringify({ topics: ['Evaluation'], registrations: [{ title: 'Revised criterion', content: question.content, kind: 'decision', scope: 'project', topics: ['Evaluation'], source_id: question.id, supersedes: previous.id }] }) };
     if (instruction.startsWith('당신은')) return { text: JSON.stringify({ verdict: 'consistent', conflicts: [], note: 'Accuracy criterion followed' }) };
     if (instruction.startsWith('사용자 대화 원문')) return { text: '{"candidates":[]}' };
     return { text: 'I will evaluate accuracy first.' };

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { Store } from './store.js';
 import { Auth } from './auth.js';
 import { Provider } from './provider.js';
+import { archiveTransientAssistantHypotheses } from './context-ai.js';
 
 const fail = (message, status = 429) => Object.assign(new Error(message), { status });
 export class WorkspaceManager {
@@ -40,17 +41,18 @@ export class WorkspaceManager {
     let runtime = this.cache.get(id);
     if (!runtime) {
       if (this.cache.size >= this.maxCached) {
-        const idle = [...this.cache].find(([, r]) => !r.busy.size && !r.inflight);
+        const idle = [...this.cache].find(([, r]) => !r.busy.size && !r.backgroundTasks.size && !r.inflight);
         if (!idle) throw fail('Demo is busy. Please try again shortly.');
         idle[1].store.close(); this.cache.delete(idle[0]);
       }
       const directory = join(this.directory, id), fresh = !existsSync(join(directory, 'contextpulse.sqlite'));
       const store = new Store(directory);
+      for (const project of store.projects()) archiveTransientAssistantHypotheses(store, project.id);
       if (fresh) store.saveSettings({ provider: 'chatgpt', model: '', autoContext: true, ollamaUrl: 'http://127.0.0.1:11434' });
       else if (store.settings().provider !== 'chatgpt' || store.settings().model === 'context-demo') store.saveSettings({ ...store.settings(), provider: 'chatgpt', model: '' });
       const encryptionKey = createHmac('sha256', this.key).update('visitor-credentials:' + id).digest();
       const auth = new Auth(directory, this.origin, this.fetcher, encryptionKey);
-      runtime = { store, auth, provider: new Provider(auth, this.fetcher), csrf: randomBytes(32).toString('hex'), busy: new Set(), inflight: 0, requests: [] };
+      runtime = { store, auth, provider: new Provider(auth, this.fetcher), csrf: randomBytes(32).toString('hex'), busy: new Set(), backgroundTasks: new Set(), inflight: 0, requests: [] };
       this.cache.set(id, runtime);
     }
     // LRU without evicting in-flight model requests.
@@ -60,6 +62,6 @@ export class WorkspaceManager {
     runtime.requests.push(Date.now());
     return { runtime, issued, id };
   }
-  busyCount() { return [...this.cache.values()].reduce((sum, r) => sum + r.busy.size, 0); }
+  busyCount() { return [...this.cache.values()].reduce((sum, r) => sum + r.busy.size + r.backgroundTasks.size, 0); }
   close() { for (const r of this.cache.values()) r.store.close(); this.cache.clear(); }
 }

@@ -1,7 +1,29 @@
 export function buildRequest(settings, instructions, blocks) {
   const text = blocks.map(b => `[${b.key}]\n${b.content}`).join('\n\n');
   if (settings.provider === 'ollama') return { provider: 'ollama', locale: settings.locale, model: settings.model, endpoint: `${settings.ollamaUrl}/api/chat`, payload: { model: settings.model, stream: false, messages: [{ role: 'system', content: instructions }, { role: 'user', content: text }] } };
-  return { provider: settings.provider, locale: settings.locale, accountClientId: settings.accountClientId, model: settings.model, endpoint: 'https://api.openai.com/v1/responses', payload: { model: settings.model, instructions, input: [{ role: 'user', content: text }], store: false, stream: true } };
+  const payload = { model: settings.model, instructions, input: [{ role: 'user', content: text }], store: false, stream: true };
+  const effort = normalizeReasoningEffort(settings.model, settings.reasoningEffort);
+  if (effort) payload.reasoning = { effort };
+  if (supportedReasoningEfforts(settings.model).length && ['low', 'medium', 'high'].includes(settings.verbosity)) payload.text = { verbosity: settings.verbosity };
+  return { provider: settings.provider, locale: settings.locale, accountClientId: settings.accountClientId, model: settings.model, endpoint: 'https://api.openai.com/v1/responses', payload };
+}
+
+export function supportedReasoningEfforts(model, advertised = null) {
+  if (Array.isArray(advertised)) return advertised.filter(value => ['low', 'medium', 'high', 'xhigh'].includes(value));
+  const id = String(model || '').toLowerCase();
+  if (/^gpt-6(?:[.-]|$)/.test(id)) return ['low', 'medium', 'high', 'xhigh'];
+  if (/^gpt-5-pro(?:$|-)/.test(id)) return ['high'];
+  if (/^gpt-5\.1-codex-max(?:$|-)/.test(id)) return ['low', 'medium', 'high', 'xhigh'];
+  if (/^gpt-5\.1(?:$|-)/.test(id)) return ['low', 'medium', 'high'];
+  if (/^gpt-5(?:$|[.-])/.test(id) || /^o[1-9](?:$|[.-])/.test(id)) return ['low', 'medium', 'high'];
+  return [];
+}
+
+export function normalizeReasoningEffort(model, effort, advertised = null) {
+  if (!effort || effort === 'auto') return null;
+  const allowed = supportedReasoningEfforts(model, advertised);
+  if (allowed.includes(effort)) return effort;
+  return allowed.includes('medium') ? 'medium' : allowed[0] || null;
 }
 
 export function providerError(status, body, requestId, locale = 'ko') {
@@ -36,7 +58,7 @@ export class Provider {
     if (!response.ok) throw await httpFailure(response, settings.locale);
     const data = await response.json();
     if (local) return (data.models || []).map(m => ({ id: m.name, name: m.name }));
-    if (data.models) return data.models.filter(m => m.visibility === 'list').map(m => ({ id: m.slug, name: m.display_name || m.slug }));
+    if (data.models) return data.models.filter(m => m.visibility === 'list').map(m => ({ id: m.slug, name: m.display_name || m.slug, ...(Array.isArray(m.supported_reasoning_efforts) ? { reasoning_efforts: m.supported_reasoning_efforts } : Array.isArray(m.reasoning_efforts) ? { reasoning_efforts: m.reasoning_efforts } : {}) }));
     return (data.data || []).map(m => ({ id: m.id, name: m.id }));
   }
   async call(request, serializedPayload) {
