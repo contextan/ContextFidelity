@@ -136,7 +136,7 @@ npm run build:css
 
 ## 라이선스
 
-Apache-2.0. 원본 디자인 참고 파일은 `design/`에 보관하며, 실행 앱은 `public/`와 `src/`에 있습니다.
+Apache-2.0. 실행 앱은 `public/`와 `src/`에 있습니다.
 
 ## 답변별 컨텍스트 확인
 
