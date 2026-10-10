@@ -14,8 +14,6 @@ npm start
 
 Open http://127.0.0.1:8899. English is the default; Korean is available at `/ko/`. Both routes share the same projects and conversations. See [한국어 안내](README.ko.md).
 
-See the [current prototype scope](docs/project-summary.md) and [Colosseum submission checklist](docs/submission-readiness.md).
-
 ## What the prototype does
 
 - Sign in once with ChatGPT from the lower-left sidebar, then choose a model in the chat composer.
@@ -41,7 +39,7 @@ Sign in once with ChatGPT using the lower-left sidebar button. After sign-in, se
 
 Original messages, versioned context, automatic-registration candidates, and model-call snapshots are stored in `data/contextpulse.sqlite`. Credentials are held separately in a server-only local file with restrictive permissions, and are excluded from exports. OS keychain integration is not implemented. Local mode stays bound to loopback. Hosted mode uses isolated visitor databases and encrypts each visitor's OAuth credentials; see the deployment guide.
 
-Conversation criteria have their own tab inside Context manager, with source evidence and archive/restore/delete controls. Assistant-generated hypotheses wait for approval before becoming searchable context. Deleting a context or criterion keeps immutable receipts for past answers. See [the current project summary](docs/project-summary.md) for the product scope and demo flow.
+Conversation criteria have their own tab inside Context manager, with source evidence and archive/restore/delete controls. Assistant-generated hypotheses wait for approval before becoming searchable context. Deleting a context or criterion keeps immutable receipts for past answers.
 
 “Context sent” is a receipt of the actual preserved request inputs; it does not measure model attention or prove how much an input influenced the answer. Editing a context item does not change earlier receipts. The fixed correction demo is labeled and makes no model calls. Real-world detection accuracy has not been benchmarked.
 
