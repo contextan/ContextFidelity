@@ -44,7 +44,7 @@ async function body(req) {
 }
 
 export function createApp({ port = 8899, directory = join(root, 'data'), fetcher = fetch, mode = 'local', publicOrigin = `http://127.0.0.1:${port}`, workspaceOptions, testOnlyProviders = [] } = {}) {
-  const config = serverConfig({ CONTEXTPULSE_MODE: mode, CONTEXTPULSE_PORT: String(port), PUBLIC_ORIGIN: publicOrigin, CONTEXTPULSE_DATA_DIR: directory }, root);
+  const config = serverConfig({ CONTEXTFIDELITY_MODE: mode, CONTEXTFIDELITY_PORT: String(port), PUBLIC_ORIGIN: publicOrigin, CONTEXTFIDELITY_DATA_DIR: directory }, root);
   const origin = mode === 'hosted' ? config.publicOrigin : `http://127.0.0.1:${port}`;
   const hosted = mode === 'hosted';
   const oauthAvailable = !hosted || supportsLoopbackChatGptOAuth(origin);
@@ -54,7 +54,8 @@ export function createApp({ port = 8899, directory = join(root, 'data'), fetcher
   const localAuth = hosted ? null : new Auth(directory, origin, fetcher);
   const local = hosted ? null : { store: localStore, auth: localAuth, provider: new Provider(localAuth, fetcher), csrf: randomBytes(32).toString('hex'), busy: new Set(), backgroundTasks: new Set(), inflight: 0 };
   const browserSessions = new Set();
-  const cookieName = hosted ? 'contextpulse_visitor' : `contextpulse_session_${port}`;
+  const cookieName = hosted ? 'contextfidelity_visitor' : `contextfidelity_session_${port}`;
+  const legacyCookieName = hosted ? 'contextpulse_visitor' : null;
   let draining = false;
   const server = createServer(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
@@ -69,16 +70,24 @@ export function createApp({ port = 8899, directory = join(root, 'data'), fetcher
       if (!(hosted ? [new URL(origin).host] : [`127.0.0.1:${port}`, `localhost:${port}`]).includes(req.headers.host)) return json({ error: '허용되지 않은 호스트입니다.' }, 403);
       if (req.headers.origin && !(hosted ? [origin] : [origin, `http://localhost:${port}`]).includes(req.headers.origin)) return json({ error: '외부 웹사이트의 요청은 허용하지 않습니다.' }, 403);
       const url = new URL(req.url, origin), path = url.pathname;
-      locale = /^\/ko(?:\/|$)/.test(path) ? 'ko' : interfaceLocale(req.headers['x-contextpulse-locale']);
+      locale = /^\/ko(?:\/|$)/.test(path) ? 'ko' : interfaceLocale(req.headers['x-contextfidelity-locale'] || req.headers['x-contextpulse-locale']);
       // Keep the app and its loopback callback on one cookie host.
       if (!hosted && req.headers.host === `localhost:${port}` && req.method === 'GET') { res.writeHead(308, { Location: `${origin}${url.pathname}${url.search}` }); return res.end(); }
       if (path === '/healthz' && req.method === 'GET') return json({ status: draining ? 'draining' : 'ok', build_id: buildId }, draining ? 503 : 200);
       if (draining) return json({ error: 'Server is restarting. Please try again shortly.' }, 503);
-      let browserSession = req.headers.cookie?.split(';').map(part => part.trim().split('=')).find(([name]) => name === cookieName)?.[1];
+      const requestCookies = new Map((req.headers.cookie || '').split(';').filter(Boolean).map(part => {
+        const separator = part.indexOf('=');
+        return separator < 0 ? [part.trim(), ''] : [part.slice(0, separator).trim(), part.slice(separator + 1)];
+      }));
+      const legacyCookie = legacyCookieName ? requestCookies.get(legacyCookieName) : null;
+      let browserSession = requestCookies.get(cookieName) || legacyCookie;
       if (hosted && (path.startsWith('/api/') || path.startsWith('/auth/'))) {
         const visitor = manager.resolve(browserSession);
         runtime = visitor.runtime; browserSession = visitor.id;
-        if (visitor.issued) res.setHeader('Set-Cookie', `${cookieName}=${visitor.issued}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000${origin.startsWith('https:') ? '; Secure' : ''}`);
+        if (visitor.issued || (legacyCookie && !requestCookies.has(cookieName))) {
+          const value = visitor.issued || browserSession;
+          res.setHeader('Set-Cookie', `${cookieName}=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000${origin.startsWith('https:') ? '; Secure' : ''}`);
+        }
       } else if (!hosted) {
         runtime = local;
         if (!browserSessions.has(browserSession)) {
@@ -112,7 +121,7 @@ export function createApp({ port = 8899, directory = join(root, 'data'), fetcher
       };
       const publicState = () => ({ build_id: buildId, mode, capabilities: { providers: allowedProviders, oauth: oauthAvailable }, projects: store.projects(), settings: store.settings(), auth: auth.publicStatus(), busy: [...busy], csrf, storage_bytes: statSync(store.path).size + (existsSync(`${store.path}-wal`) ? statSync(`${store.path}-wal`).size : 0) });
       if (path === '/api/state' && req.method === 'GET') return json(publicState());
-      if (path.startsWith('/api/') && req.headers['x-contextpulse-token'] !== csrf) return json({ error: '앱을 새로고침한 뒤 다시 시도하세요.', code: 'CSRF_RELOAD' }, 403);
+      if (path.startsWith('/api/') && (req.headers['x-contextfidelity-token'] || req.headers['x-contextpulse-token']) !== csrf) return json({ error: '앱을 새로고침한 뒤 다시 시도하세요.', code: 'CSRF_RELOAD' }, 403);
       if (path === '/api/data' && req.method === 'DELETE') {
         if (busy.size || runtime.backgroundTasks.size) throw Object.assign(new Error('진행 중인 답변과 자동 등록이 끝난 뒤 데이터를 삭제할 수 있습니다.'), { status: 409 });
         const project = store.clearAllData(locale);
@@ -340,13 +349,13 @@ export function createApp({ port = 8899, directory = join(root, 'data'), fetcher
         store.saveSettings({ ...settings, chatgptModels, ...(settings.provider === 'chatgpt' && (wasActive || settings.model === settings.chatgptModels?.[clientId]) ? { model: '' } : {}) });
         return json(publicState());
       }
-      if (path === '/api/export' && req.method === 'GET') { res.setHeader('Content-Disposition', 'attachment; filename="contextpulse-backup.json"'); return json(store.export()); }
+      if (path === '/api/export' && req.method === 'GET') { res.setHeader('Content-Disposition', 'attachment; filename="contextfidelity-backup.json"'); return json(store.export()); }
       if (path === '/api/export/sqlite' && req.method === 'GET') {
-        const temporary = mkdtempSync(join(tmpdir(), 'contextpulse-backup-'));
+        const temporary = mkdtempSync(join(tmpdir(), 'contextfidelity-backup-'));
         try {
-          const file = join(temporary, 'contextpulse.sqlite');
+          const file = join(temporary, 'contextfidelity.sqlite');
           await backup(store.db, file);
-          res.writeHead(200, { 'Content-Type': 'application/vnd.sqlite3', 'Content-Disposition': 'attachment; filename="contextpulse.sqlite"' }); res.end(readFileSync(file));
+          res.writeHead(200, { 'Content-Type': 'application/vnd.sqlite3', 'Content-Disposition': 'attachment; filename="contextfidelity.sqlite"' }); res.end(readFileSync(file));
         } finally { rmSync(temporary, { recursive: true, force: true }); }
         return;
       }

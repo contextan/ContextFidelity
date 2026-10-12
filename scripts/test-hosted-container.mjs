@@ -8,7 +8,7 @@ const visitor = async cookie => {
   return { cookie: r.headers.get('set-cookie')?.split(';')[0] || cookie, state: await r.json() };
 };
 const api = async (v, path, data) => {
-  const r = await fetch(origin + '/api' + path, { method: data === undefined ? 'GET' : 'POST', headers: { Connection: 'close', Cookie: v.cookie, 'X-ContextPulse-Token': v.state.csrf, 'Content-Type': 'application/json' }, ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
+  const r = await fetch(origin + '/api' + path, { method: data === undefined ? 'GET' : 'POST', headers: { Connection: 'close', Cookie: v.cookie, 'X-ContextFidelity-Token': v.state.csrf, 'Content-Type': 'application/json' }, ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
   return { status: r.status, value: await r.json() };
 };
 assert.equal((await fetch(origin + '/healthz')).status, 200);

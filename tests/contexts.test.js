@@ -8,7 +8,7 @@ import { selectMaterials, selectContext, executeRun, compareSnapshots } from '..
 import { createApp } from '../src/server.js';
 
 function setup(t) {
-  const dir = mkdtempSync(join(tmpdir(), 'contextpulse-contexts-'));
+  const dir = mkdtempSync(join(tmpdir(), 'contextfidelity-contexts-'));
   const store = new Store(dir), project = store.projects()[0], session = store.sessions(project.id)[0];
   t.after(() => { store.close(); rmSync(dir, { recursive: true, force: true }); });
   const add = (changes = {}) => store.saveContext(project.id, { title: '제품 배경', content: '현재 서비스의 사용자 문제', kind: 'background', scope: 'project', topics: [], include_mode: 'auto', ...changes });
@@ -118,13 +118,13 @@ test('context origin and per-chat overrides cannot cross project boundaries', t 
 });
 
 test('HTTP context management feeds exact selected versions into requests and exports', async t => {
-  const dir = mkdtempSync(join(tmpdir(), 'contextpulse-context-http-'));
+  const dir = mkdtempSync(join(tmpdir(), 'contextfidelity-context-http-'));
   const port = 21000 + Math.floor(Math.random() * 1000), app = createApp({ port, directory: dir, testOnlyProviders: ['demo'] });
   await new Promise(resolve => app.server.listen(port, '127.0.0.1', resolve));
   t.after(async () => { await new Promise(resolve => app.server.close(resolve)); app.store.close(); rmSync(dir, { recursive: true, force: true }); });
   const state = await (await fetch(`${app.origin}/api/state`)).json();
   const call = async (path, data) => {
-    const response = await fetch(`${app.origin}/api${path}`, { method: data ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', 'X-ContextPulse-Token': state.csrf }, ...(data ? { body: JSON.stringify(data) } : {}) });
+    const response = await fetch(`${app.origin}/api${path}`, { method: data ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', 'X-ContextFidelity-Token': state.csrf }, ...(data ? { body: JSON.stringify(data) } : {}) });
     assert.ok(response.ok, `${path}: ${response.status}`);
     return response.json();
   };
@@ -147,7 +147,7 @@ test('HTTP context management feeds exact selected versions into requests and ex
   await call(`/contexts/${v2.id}/archive`, { archived: true });
   assert.equal((await call(`/sessions/${session.id}/context-preview`, { topics: ['디자인'] })).selected.length, 0);
   const remove = async path => {
-    const response = await fetch(`${app.origin}/api${path}`, { method: 'DELETE', headers: { 'X-ContextPulse-Token': state.csrf, 'Content-Type': 'application/json' }, body: '{}' });
+    const response = await fetch(`${app.origin}/api${path}`, { method: 'DELETE', headers: { 'X-ContextFidelity-Token': state.csrf, 'Content-Type': 'application/json' }, body: '{}' });
     const payload = await response.json();
     assert.ok(response.ok, `${path}: ${response.status} ${JSON.stringify(payload)}`);
     return payload;

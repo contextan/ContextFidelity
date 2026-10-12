@@ -10,7 +10,7 @@ COPY tailwind.config.cjs ./
 RUN npm run build
 
 FROM node:24.14.1-bookworm-slim
-ENV NODE_ENV=production CONTEXTPULSE_MODE=hosted CONTEXTPULSE_PORT=8899 CONTEXTPULSE_DATA_DIR=/app/data
+ENV NODE_ENV=production CONTEXTFIDELITY_MODE=hosted CONTEXTFIDELITY_PORT=8899 CONTEXTFIDELITY_DATA_DIR=/app/data
 WORKDIR /app
 COPY --from=build --chown=node:node /app/src ./src
 COPY --from=build --chown=node:node /app/locales ./locales

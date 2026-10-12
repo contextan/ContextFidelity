@@ -3,7 +3,7 @@ import { currentBuildId } from '../src/build-id.js';
 import { systemText } from '../src/localization.js';
 
 const root = new URL('../', import.meta.url);
-const client = readFileSync(new URL('src/client.js', root), 'utf8').replace('__CONTEXT_PULSE_BUILD__', currentBuildId());
+const client = readFileSync(new URL('src/client.js', root), 'utf8').replace('__CONTEXT_FIDELITY_BUILD__', currentBuildId());
 const shell = readFileSync(new URL('src/client.html', root), 'utf8');
 const enClient = systemText(client);
 const enShell = systemText(shell).replace('lang="ko"', 'lang="en"');

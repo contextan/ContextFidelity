@@ -11,7 +11,7 @@ import { executeRun, selectContext, parseValidation, compareSnapshots } from '..
 import { createApp } from '../src/server.js';
 
 function fixture(t) {
-  const dir = mkdtempSync(join(tmpdir(), 'contextpulse-test-'));
+  const dir = mkdtempSync(join(tmpdir(), 'contextfidelity-test-'));
   const store = new Store(dir), project = store.projects()[0], session = store.sessions(project.id)[0];
   t.after(() => { store.close(); rmSync(dir, { recursive: true, force: true }); });
   return { store, project, session, dir };
@@ -204,12 +204,12 @@ test('OAuth ID signature, audience and nonce are verified', async t => {
   await assert.rejects(auth.validateIdToken(`${token.slice(0, -5)}aaaaa`, 'issued-client', 'nonce'), /서명/);
 });
 test('HTTP isolation, persistence and authentic SQLite export', async t => {
-  const dir = mkdtempSync(join(tmpdir(), 'contextpulse-http-'));
+  const dir = mkdtempSync(join(tmpdir(), 'contextfidelity-http-'));
   const port = 19000 + Math.floor(Math.random() * 1000), app = createApp({ port, directory: dir });
   await new Promise(resolve => app.server.listen(port, '127.0.0.1', resolve));
   t.after(async () => { await new Promise(resolve => app.server.close(resolve)); app.store.close(); rmSync(dir, { recursive: true, force: true }); });
   const initial = await (await fetch(`${app.origin}/api/state`)).json();
-  const headers = { 'Content-Type': 'application/json', 'X-ContextPulse-Token': initial.csrf };
+  const headers = { 'Content-Type': 'application/json', 'X-ContextFidelity-Token': initial.csrf };
   assert.deepEqual(initial.capabilities.providers, ['chatgpt']);
   assert.equal((await fetch(`${app.origin}/api/settings`, { method: 'POST', headers, body: JSON.stringify({ provider: 'openai', model: 'test', apiKey: 'not-accepted' }) })).status, 400);
   assert.equal((await fetch(`${app.origin}/api/projects`, { method: 'POST', headers: { ...headers, Origin: 'https://evil.invalid' }, body: '{}' })).status, 403);
@@ -234,7 +234,7 @@ test('HTTP isolation, persistence and authentic SQLite export', async t => {
 });
 
 test('process restart restores original messages and marks interrupted requests failed', t => {
-  const dir = mkdtempSync(join(tmpdir(), 'contextpulse-restart-'));
+  const dir = mkdtempSync(join(tmpdir(), 'contextfidelity-restart-'));
   const first = new Store(dir), session = first.sessions(first.projects()[0].id)[0];
   const message = first.addMessage(session.id, 'user', '  <b>원문 그대로</b>\n', []);
   const runId = first.createRun(session.id, message.id, { provider: 'openai', model: 'test' });

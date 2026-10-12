@@ -26,7 +26,7 @@ export class WorkspaceManager {
     if (!/^[a-f0-9]{48}$/.test(id || '') || !/^\d{13}$/.test(expiry || '') || Number(expiry) < Date.now()) return null;
     const expected = this.sign(`${id}.${expiry}`);
     if (signature?.length !== expected.length || !timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
-    return existsSync(join(this.directory, id, 'contextpulse.sqlite')) ? id : null;
+    return existsSync(join(this.directory, id, 'contextfidelity.sqlite')) || existsSync(join(this.directory, id, 'contextpulse.sqlite')) ? id : null;
   }
   resolve(cookie) {
     let id = this.verify(cookie), issued = null;
@@ -45,7 +45,7 @@ export class WorkspaceManager {
         if (!idle) throw fail('Demo is busy. Please try again shortly.');
         idle[1].store.close(); this.cache.delete(idle[0]);
       }
-      const directory = join(this.directory, id), fresh = !existsSync(join(directory, 'contextpulse.sqlite'));
+      const directory = join(this.directory, id), fresh = !existsSync(join(directory, 'contextfidelity.sqlite')) && !existsSync(join(directory, 'contextpulse.sqlite'));
       const store = new Store(directory);
       for (const project of store.projects()) archiveTransientAssistantHypotheses(store, project.id);
       if (fresh) store.saveSettings({ provider: 'chatgpt', model: '', autoContext: true, ollamaUrl: 'http://127.0.0.1:11434' });

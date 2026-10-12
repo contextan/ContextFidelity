@@ -3,7 +3,7 @@ import { writeFileSync } from 'node:fs';
 const origin = process.env.TEST_ORIGIN || 'http://127.0.0.1:8899';
 const state = await (await fetch(origin + '/api/state')).json();
 assert.notEqual(state.settings.provider, 'demo', 'Connect a real model before this integration test.');
-const headers = { 'Content-Type': 'application/json', 'X-ContextPulse-Token': state.csrf, 'X-ContextPulse-Locale': 'en' };
+const headers = { 'Content-Type': 'application/json', 'X-ContextFidelity-Token': state.csrf, 'X-ContextFidelity-Locale': 'en' };
 const api = async (path, data) => {
   const response = await fetch(origin + '/api' + path, { method: data === undefined ? 'GET' : 'POST', headers, ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
   const value = await response.json(); assert.ok(response.ok, value.error); return value;

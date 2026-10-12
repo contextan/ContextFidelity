@@ -1,10 +1,11 @@
+# Keep the existing Compose project identity for in-place upgrades.
 name: contextpulse-test
 services:
   app:
     build: .
-    image: contextpulse:prototype
+    image: contextfidelity:prototype
     environment:
-      CONTEXTPULSE_MODE: hosted
+      CONTEXTFIDELITY_MODE: hosted
       PUBLIC_ORIGIN: http://127.0.0.1:8903
     ports:
       - "127.0.0.1:8903:8899"
@@ -20,3 +21,4 @@ services:
     mem_limit: 512m
 volumes:
   demo-data:
+    name: contextpulse-test_demo-data

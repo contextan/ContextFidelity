@@ -1,6 +1,18 @@
-const CLIENT_BUILD_ID = '2eb43b8c021c';
+const CLIENT_BUILD_ID = '4b7a22131bb8';
 const LOCALE = /^\/ko(?:\/|$)/.test(location.pathname) ? 'ko' : 'en';
 const DATE_LOCALE = LOCALE === 'ko' ? 'ko-KR' : 'en-US';
+function migrateLegacyStorage(storage) {
+  const legacyPrefix = 'contextpulse.';
+  const currentPrefix = 'contextfidelity.';
+  const legacyKeys = Array.from({ length: storage.length }, (_, index) => storage.key(index)).filter(key => key?.startsWith(legacyPrefix));
+  for (const key of legacyKeys) {
+    const currentKey = currentPrefix + key.slice(legacyPrefix.length);
+    if (storage.getItem(currentKey) === null) storage.setItem(currentKey, storage.getItem(key));
+    storage.removeItem(key);
+  }
+}
+migrateLegacyStorage(localStorage);
+migrateLegacyStorage(sessionStorage);
 const PAGE_ROUTES = { chat: '', contexts: 'contexts', settings: 'settings', inspector: 'records' };
 function routePath(name, locale = LOCALE) { return `${locale === 'ko' ? '/ko' : ''}/${PAGE_ROUTES[name] || ''}`; }
 function routeName() {
@@ -37,10 +49,10 @@ function registrationPill(run) {
 }
 
 async function api(path, method = 'GET', data) {
-  const request = () => fetch(`/api${path}`, { method, headers: { 'Content-Type': 'application/json', 'X-ContextPulse-Locale': LOCALE, ...(state?.csrf ? { 'X-ContextPulse-Token': state.csrf } : {}) }, ...(data !== undefined ? { body: JSON.stringify(data) } : {}) });
+  const request = () => fetch(`/api${path}`, { method, headers: { 'Content-Type': 'application/json', 'X-ContextFidelity-Locale': LOCALE, ...(state?.csrf ? { 'X-ContextFidelity-Token': state.csrf } : {}) }, ...(data !== undefined ? { body: JSON.stringify(data) } : {}) });
   let response = await request(), result = await response.json();
   if (response.status === 403 && result.code === 'CSRF_RELOAD') {
-    state = await (await fetch('/api/state', { headers: { 'X-ContextPulse-Locale': LOCALE } })).json();
+    state = await (await fetch('/api/state', { headers: { 'X-ContextFidelity-Locale': LOCALE } })).json();
     response = await request(); result = await response.json();
   }
   if (!response.ok) throw new Error(result.error || 'The request could not be completed.');
@@ -96,7 +108,7 @@ function showPlanWelcome() {
 async function oauthCompleted() {
   clearTimeout(oauthTimer); oauthTimer = null; oauthUrl = '';
   state = await api('/state'); models.delete('chatgpt'); modelErrors.delete('chatgpt');
-  sessionStorage.removeItem('contextpulse.oauthAttempt');
+  sessionStorage.removeItem('contextfidelity.oauthAttempt');
   await navigate(state.auth.chatgptConnected ? 'chat' : 'settings');
   if (oauthPopup && !oauthPopup.closed) oauthPopup.close(); oauthPopup = null;
   toast(oauthAttempt.message);
@@ -121,7 +133,7 @@ async function startOAuth(target) {
   try {
     const result = await api('/auth/start', 'POST', { client_id: target.dataset.client || null, consent: target.dataset.consent === 'true' });
     oauthUrl = result.url; oauthAttempt = result.attempt;
-    sessionStorage.setItem('contextpulse.oauthAttempt', oauthAttempt.id);
+    sessionStorage.setItem('contextfidelity.oauthAttempt', oauthAttempt.id);
     if (oauthPopup) oauthPopup.location = oauthUrl;
     await navigate('settings'); watchOAuth();
   } catch (error) { oauthPopup?.close(); oauthAttempt = { status: 'failed', message: error.message }; renderShell(); throw error; }
@@ -179,8 +191,8 @@ function reasoningPickerHtml(busy = false) {
 async function loadProject(projectId, sessionId) {
   const previousSession = session?.id;
   project = await api(`/projects/${projectId}`);
-  localStorage.setItem('contextpulse.project', projectId);
-  const remembered = localStorage.getItem(`contextpulse.session.${projectId}`);
+  localStorage.setItem('contextfidelity.project', projectId);
+  const remembered = localStorage.getItem(`contextfidelity.session.${projectId}`);
   const candidate = sessionId || remembered;
   session = project.sessions.find(s => s.id === candidate) || project.sessions[0];
   if (!session) session = await api('/sessions', 'POST', { project_id: projectId });
@@ -191,7 +203,7 @@ async function loadProject(projectId, sessionId) {
     editor = null;
     chatStickToBottom = true;
   }
-  localStorage.setItem(`contextpulse.session.${projectId}`, session.id);
+  localStorage.setItem(`contextfidelity.session.${projectId}`, session.id);
   if (!detail.runs.some(r => r.id === selectedRun)) selectedRun = detail.runs[0]?.id || null;
   await loadContextPreview();
   startPolling();
@@ -352,7 +364,7 @@ function messageHtml(message) {
   if (message.role === 'system') return `<div id="${esc(message.id)}" class="text-xs text-emerald-700 px-2 py-1">${esc(message.content)}</div>`;
   return `<article id="${esc(message.id)}" class="chat-message ${ai ? 'chat-message-assistant' : 'chat-message-user'}">
     <div class="chat-message-content">
-      <div class="chat-message-heading"><span class="${ai ? 'chat-assistant-name' : 'chat-user-name'}">${ai ? 'ContextPulse' : 'You'}</span></div>
+      <div class="chat-message-heading"><span class="${ai ? 'chat-assistant-name' : 'chat-user-name'}">${ai ? 'ContextFidelity' : 'You'}</span></div>
       <div class="chat-message-bubble ${ai ? 'chat-assistant-bubble' : 'chat-user-bubble'}"><div class="message-body">${esc(message.content)}</div></div>
       ${run ? `<div class="chat-run-meta">${pill(statusLabel[run.status], run.status === 'corrected' || run.status === 'consistent' ? 'green' : run.status === 'unresolved' || run.status === 'failed' ? 'red' : run.status === 'uncertain' ? 'amber' : 'slate')}${registrationPill(run)}${run.provider === 'demo' ? pill('Demo · No model call', 'amber') : ''}${button('Validation details', 'inspect', `data-run="${esc(run.id)}"`)}</div>` : ''}
       ${run?.validation?.context_warning ? `<p class="mt-2 text-xs text-amber-800">${esc(run.ui_warning || run.validation.context_warning)}</p>` : ''}
@@ -728,7 +740,7 @@ async function syncConnection() {
   syncTask = (async () => {
     const previous = state?.auth?.activeClientId, next = await api('/state');
     if (next.build_id && next.build_id !== CLIENT_BUILD_ID) {
-      sessionStorage.setItem('contextpulse.languageDraft', JSON.stringify({ projectId: project?.project.id, sessionId: session?.id, draft, topics, contextTab, editor, selectedRun, inspectorMode }));
+      sessionStorage.setItem('contextfidelity.languageDraft', JSON.stringify({ projectId: project?.project.id, sessionId: session?.id, draft, topics, contextTab, editor, selectedRun, inspectorMode }));
       location.reload(); return;
     }
     state = next;
@@ -762,7 +774,7 @@ function projectDialog() {
   document.body.append(dialog); dialog.showModal(); dialog.addEventListener('close', () => dialog.remove());
 }
 async function download(path, filename) {
-  const response = await fetch(`/api${path}`, { headers: { 'X-ContextPulse-Token': state.csrf, 'X-ContextPulse-Locale': LOCALE } });
+  const response = await fetch(`/api${path}`, { headers: { 'X-ContextFidelity-Token': state.csrf, 'X-ContextFidelity-Locale': LOCALE } });
   if (!response.ok) throw new Error('Export failed.');
   const url = URL.createObjectURL(await response.blob()), a = document.createElement('a');
   a.href = url; a.download = filename; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -806,7 +818,7 @@ document.addEventListener('change', async event => {
     if (event.target.id === 'language-select') {
       const nextLocale = event.target.value;
       if (nextLocale !== LOCALE && ['en', 'ko'].includes(nextLocale)) {
-        sessionStorage.setItem('contextpulse.languageDraft', JSON.stringify({ sessionId: session.id, projectId: project.project.id, draft, topics, contextTab, editor, selectedRun, inspectorMode }));
+        sessionStorage.setItem('contextfidelity.languageDraft', JSON.stringify({ sessionId: session.id, projectId: project.project.id, draft, topics, contextTab, editor, selectedRun, inspectorMode }));
         location.assign(routePath(pageName, nextLocale));
       }
       return;
@@ -922,7 +934,7 @@ document.addEventListener('click', async event => {
     }
     if (action === 'oauth-cancel') {
       const result = await api('/auth/cancel', 'POST', {}); oauthAttempt = result.attempt;
-      clearTimeout(oauthTimer); sessionStorage.removeItem('contextpulse.oauthAttempt'); oauthUrl = ''; oauthPopup?.close(); oauthPopup = null; renderShell(); return;
+      clearTimeout(oauthTimer); sessionStorage.removeItem('contextfidelity.oauthAttempt'); oauthUrl = ''; oauthPopup?.close(); oauthPopup = null; renderShell(); return;
     }
     if (action === 'acknowledge-plan') {
       state = await api('/auth/acknowledge', 'POST', {}); $('#plan-welcome')?.remove(); return;
@@ -935,8 +947,8 @@ document.addEventListener('click', async event => {
       target.disabled = true; state = await api('/auth/disconnect', 'POST', {});
       models.delete('chatgpt'); modelErrors.delete('chatgpt'); oauthAttempt = { status: 'idle' }; render(); toast(state.disconnect.message); return;
     }
-    if (action === 'export-json') return download('/export', 'contextpulse-backup.json');
-    if (action === 'export-sqlite') return download('/export/sqlite', 'contextpulse.sqlite');
+    if (action === 'export-json') return download('/export', 'contextfidelity-backup.json');
+    if (action === 'export-sqlite') return download('/export/sqlite', 'contextfidelity.sqlite');
     if (action === 'clear-all-data') return await clearAllData();
     if (action === 'compare-previous') {
       const current = detail.runs.findIndex(r => r.id === selectedRun), previous = detail.runs[current + 1];
@@ -978,11 +990,11 @@ window.addEventListener('popstate', async () => { pageName = routeName(); await 
 async function init() {
   syncSidebarAccessibility();
   state = await api('/state');
-  const preferred = localStorage.getItem('contextpulse.project');
+  const preferred = localStorage.getItem('contextfidelity.project');
   await loadProject(state.projects.find(p => p.id === preferred)?.id || state.projects[0].id);
   try {
-    const saved = JSON.parse(sessionStorage.getItem('contextpulse.languageDraft') || 'null');
-    sessionStorage.removeItem('contextpulse.languageDraft');
+    const saved = JSON.parse(sessionStorage.getItem('contextfidelity.languageDraft') || 'null');
+    sessionStorage.removeItem('contextfidelity.languageDraft');
     if (saved?.sessionId === session.id && saved?.projectId === project.project.id) {
       draft = saved.draft; topics = saved.topics;
       contextTab = saved.contextTab; editor = saved.editor; selectedRun = saved.selectedRun; inspectorMode = saved.inspectorMode;
@@ -991,8 +1003,8 @@ async function init() {
   } catch { /* Ignore an expired or invalid temporary draft. */ }
   render();
   const authStatus = await api('/auth/status'); oauthAttempt = authStatus.attempt;
-  if (sessionStorage.getItem('contextpulse.oauthAttempt') && oauthAttempt.status === 'idle') { sessionStorage.removeItem('contextpulse.oauthAttempt'); toast('The login attempt ended when the app restarted. Start connecting again.'); }
-  if (['connected', 'permission_required'].includes(oauthAttempt.status)) sessionStorage.removeItem('contextpulse.oauthAttempt');
+  if (sessionStorage.getItem('contextfidelity.oauthAttempt') && oauthAttempt.status === 'idle') { sessionStorage.removeItem('contextfidelity.oauthAttempt'); toast('The login attempt ended when the app restarted. Start connecting again.'); }
+  if (['connected', 'permission_required'].includes(oauthAttempt.status)) sessionStorage.removeItem('contextfidelity.oauthAttempt');
   const authMessage = new URLSearchParams(location.search).get('auth') || (location.hash.includes('?auth=') ? decodeURIComponent(location.hash.split('?auth=')[1]) : '');
   if (authMessage) { toast(authMessage); history.replaceState(null, '', routePath(pageName)); }
   if (pageName === 'settings') showPlanWelcome();

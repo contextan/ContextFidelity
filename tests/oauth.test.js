@@ -17,7 +17,7 @@ function jwt(client, nonce, sub = 'subject-a') {
   return `${head}.${body}.${sign('RSA-SHA256', Buffer.from(`${head}.${body}`), privateKey).toString('base64url')}`;
 }
 function setup(t) {
-  const directory = mkdtempSync(join(tmpdir(), 'contextpulse-oauth-'));
+  const directory = mkdtempSync(join(tmpdir(), 'contextfidelity-oauth-'));
   const calls = [], control = { tokens: {}, error: null, revoke: 200 };
   const fetcher = async (url, options = {}) => {
     calls.push({ url, options });
@@ -161,7 +161,7 @@ test('only disconnected account registrations can be removed from the saved list
 });
 
 test('HTTP callback, status, account models, first-use acknowledgement, cancellation and canonical host work together', async t => {
-  const directory = mkdtempSync(join(tmpdir(), 'contextpulse-oauth-http-'));
+  const directory = mkdtempSync(join(tmpdir(), 'contextfidelity-oauth-http-'));
   const port = 24500 + Math.floor(Math.random() * 300);
   let nonce;
   const app = createApp({ port, directory, fetcher: async url => {
@@ -173,7 +173,7 @@ test('HTTP callback, status, account models, first-use acknowledgement, cancella
   await new Promise(resolve => app.server.listen(port, '127.0.0.1', resolve));
   t.after(async () => { await new Promise(resolve => app.server.close(resolve)); app.store.close(); rmSync(directory, { recursive: true, force: true }); });
   const initial = await fetch(`${app.origin}/api/state`), cookie = initial.headers.get('set-cookie').split(';')[0], state = await initial.json();
-  const headers = { 'Content-Type': 'application/json', 'X-ContextPulse-Token': state.csrf, Cookie: cookie };
+  const headers = { 'Content-Type': 'application/json', 'X-ContextFidelity-Token': state.csrf, Cookie: cookie };
   const api = async (path, data) => (await fetch(`${app.origin}/api${path}`, { headers, method: data ? 'POST' : 'GET', ...(data ? { body: JSON.stringify(data) } : {}) })).json();
   const start = await api('/auth/start', {}), authorize = new URL(start.url); nonce = authorize.searchParams.get('nonce');
   assert.equal(start.attempt.status, 'pending');

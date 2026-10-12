@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync, chmodSync } from 'node:fs';
+import { mkdirSync, chmodSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { systemText } from './localization.js';
@@ -49,7 +49,10 @@ function searchDocumentTerms(value) {
 export class Store {
   constructor(directory) {
     mkdirSync(directory, { recursive: true, mode: 0o700 });
-    this.path = join(directory, 'contextpulse.sqlite');
+    const currentPath = join(directory, 'contextfidelity.sqlite');
+    const legacyPath = join(directory, 'contextpulse.sqlite');
+    // Keep opening existing databases in place; fresh installs use the new filename.
+    this.path = existsSync(currentPath) || !existsSync(legacyPath) ? currentPath : legacyPath;
     this.db = new DatabaseSync(this.path);
     chmodSync(this.path, 0o600);
     this.db.exec(`
@@ -418,6 +421,7 @@ export class Store {
   }
   export() {
     const tables = ['projects', 'sessions', 'messages', 'decisions', 'contexts', 'context_suppressions', 'context_overrides', 'context_candidates', 'runs', 'snapshots', 'call_results'];
+    // Keep the v1 format identifier stable so existing export consumers still recognize it.
     return { format: 'contextpulse-v1', exported_at: now(), tables: Object.fromEntries(tables.map(t => [t, this.db.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()])) };
   }
   deleteSession(sessionId, locale = 'en') {
