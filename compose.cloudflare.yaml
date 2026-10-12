@@ -1,11 +1,12 @@
 # Separate configuration: starts a public tunnel ONLY when explicitly run.
+# Keep the existing Compose project identity for in-place upgrades.
 name: contextpulse-public
 services:
   app:
     build: .
-    image: contextpulse:prototype
+    image: contextfidelity:prototype
     environment:
-      CONTEXTPULSE_MODE: hosted
+      CONTEXTFIDELITY_MODE: hosted
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?Set the exact HTTPS demo origin}
     volumes:
       - demo-data:/app/data
@@ -31,3 +32,4 @@ secrets:
     file: ${TUNNEL_TOKEN_FILE:?Set a protected tunnel token file path}
 volumes:
   demo-data:
+    name: contextpulse-public_demo-data

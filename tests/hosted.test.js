@@ -9,7 +9,7 @@ import { createApp } from '../src/server.js';
 import { serverConfig, supportsLoopbackChatGptOAuth } from '../src/config.js';
 
 async function setup(t, options = {}) {
-  const directory = mkdtempSync(join(tmpdir(), 'contextpulse-hosted-'));
+  const directory = mkdtempSync(join(tmpdir(), 'contextfidelity-hosted-'));
   const port = 26000 + Math.floor(Math.random() * 2000);
   let app;
   const start = async () => { app = createApp({ directory, port, mode: 'hosted', ...options }); await new Promise(r => app.server.listen(port, '127.0.0.1', r)); return app; };
@@ -20,7 +20,7 @@ async function setup(t, options = {}) {
     const state = await response.json();
     return { cookie: response.headers.get('set-cookie')?.split(';')[0] || cookie, state };
   };
-  const call = (v, path, data, extra = {}) => fetch(app.origin + path, { method: data === undefined ? 'GET' : 'POST', headers: { Connection: 'close', Cookie: v.cookie, 'X-ContextPulse-Token': v.state.csrf, 'Content-Type': 'application/json', ...extra }, ...(data !== undefined ? { body: JSON.stringify(data) } : {}) });
+  const call = (v, path, data, extra = {}) => fetch(app.origin + path, { method: data === undefined ? 'GET' : 'POST', headers: { Connection: 'close', Cookie: v.cookie, 'X-ContextFidelity-Token': v.state.csrf, 'Content-Type': 'application/json', ...extra }, ...(data !== undefined ? { body: JSON.stringify(data) } : {}) });
   return { directory, get app() { return app; }, start, visitor, call };
 }
 
@@ -36,7 +36,7 @@ test('hosted visitors cannot read another visitor project, message, run, export 
   const demo = await (await f.call(a, '/api/demo', {})).json();
   const detail = await (await f.call(a, '/api/sessions/' + demo.session.id)).json();
   for (const path of [`/api/projects/${demo.project.id}`, `/api/sessions/${demo.session.id}`, `/api/runs/${demo.run_id}`, `/api/messages/${detail.messages[0].id}`]) assert.equal((await f.call(b, path)).status, 404);
-  assert.equal((await f.call(b, '/api/projects/' + demo.project.id, undefined, { 'X-ContextPulse-Token': a.state.csrf })).status, 403);
+  assert.equal((await f.call(b, '/api/projects/' + demo.project.id, undefined, { 'X-ContextFidelity-Token': a.state.csrf })).status, 403);
   const exported = JSON.stringify(await (await f.call(b, '/api/export')).json());
   assert.ok(!exported.includes(demo.project.id));
   assert.equal((await f.call(a, '/api/settings', { provider: 'openai', model: 'fixture', apiKey: 'private-test-key', autoContext: true })).status, 400);
@@ -101,9 +101,9 @@ test('static pages and health do not allocate visitor DBs; workspace limits are 
 });
 
 test('configuration requires canonical HTTPS public origin, with loopback allowed for testing', () => {
-  assert.throws(() => serverConfig({ CONTEXTPULSE_MODE: 'hosted', PUBLIC_ORIGIN: 'http://example.com' }, '/tmp'));
-  assert.throws(() => serverConfig({ CONTEXTPULSE_MODE: 'hosted', PUBLIC_ORIGIN: 'https://example.com/' }, '/tmp'));
-  const c = serverConfig({ CONTEXTPULSE_MODE: 'hosted', PUBLIC_ORIGIN: 'https://demo.example.com', PORT: '8899' }, '/tmp');
+  assert.throws(() => serverConfig({ CONTEXTFIDELITY_MODE: 'hosted', PUBLIC_ORIGIN: 'http://example.com' }, '/tmp'));
+  assert.throws(() => serverConfig({ CONTEXTFIDELITY_MODE: 'hosted', PUBLIC_ORIGIN: 'https://example.com/' }, '/tmp'));
+  const c = serverConfig({ CONTEXTFIDELITY_MODE: 'hosted', PUBLIC_ORIGIN: 'https://demo.example.com', PORT: '8899' }, '/tmp');
   assert.equal(c.host, '0.0.0.0'); assert.equal(c.publicOrigin, 'https://demo.example.com');
   assert.equal(supportsLoopbackChatGptOAuth('http://127.0.0.1:8903'), true);
   assert.equal(supportsLoopbackChatGptOAuth('http://localhost:8903'), true);
@@ -111,7 +111,7 @@ test('configuration requires canonical HTTPS public origin, with loopback allowe
 });
 
 test('public HTTPS hosted mode never falls back to fake chat when website OAuth is unavailable', async t => {
-  const directory = mkdtempSync(join(tmpdir(), 'contextpulse-public-hosted-'));
+  const directory = mkdtempSync(join(tmpdir(), 'contextfidelity-public-hosted-'));
   const port = 28000 + Math.floor(Math.random() * 1000), host = 'demo.example.test';
   const app = createApp({ directory, port, mode: 'hosted', publicOrigin: `https://${host}` });
   await new Promise(resolve => app.server.listen(port, '127.0.0.1', resolve));
@@ -129,7 +129,7 @@ test('public HTTPS hosted mode never falls back to fake chat when website OAuth 
   assert.equal(state.settings.provider, 'chatgpt');
   assert.equal(state.capabilities.oauth, false);
   assert.deepEqual(state.capabilities.providers, []);
-  const common = { Origin: `https://${host}`, Cookie: cookie, 'X-ContextPulse-Token': state.csrf, 'Content-Type': 'application/json' };
+  const common = { Origin: `https://${host}`, Cookie: cookie, 'X-ContextFidelity-Token': state.csrf, 'Content-Type': 'application/json' };
   const login = await send('/api/auth/start', 'POST', '{}', common);
   assert.equal(login.status, 400);
   const modelList = await send('/api/models', 'POST', JSON.stringify({ provider: 'demo' }), common);

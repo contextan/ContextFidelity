@@ -8,7 +8,7 @@ import { executeRun } from '../src/pipeline.js';
 import { contextUsage } from '../src/context-usage.js';
 
 function setup(t) {
-  const directory = mkdtempSync(join(tmpdir(), 'contextpulse-fts5-'));
+  const directory = mkdtempSync(join(tmpdir(), 'contextfidelity-fts5-'));
   const store = new Store(directory), project = store.projects()[0], session = store.sessions(project.id)[0];
   t.after(() => { try { store.close(); } catch {} rmSync(directory, { recursive: true, force: true }); });
   const add = (title, content, changes = {}) => store.saveContext(project.id, {

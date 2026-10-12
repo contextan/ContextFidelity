@@ -10,7 +10,7 @@ import { parseCandidates, parseTopicAnalysis, analyzeConversation, registerCandi
 import { createApp } from '../src/server.js';
 
 function setup(t) {
-  const directory = mkdtempSync(join(tmpdir(), 'contextpulse-ai-'));
+  const directory = mkdtempSync(join(tmpdir(), 'contextfidelity-ai-'));
   const store = new Store(directory), project = store.projects()[0], session = store.sessions(project.id)[0];
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
   const add = changes => store.saveContext(project.id, { title: '문제 가설', content: '기본 참고 자료 내용', kind: 'hypothesis', scope: 'topic', topics: ['제품'], include_mode: 'auto', ...changes });
@@ -268,7 +268,7 @@ test('failed extraction preserves the verified answer and reports a separate reg
 });
 
 test('HTTP automatic registration, selected input display and export persist real model-call snapshots', async t => {
-  const directory = mkdtempSync(join(tmpdir(), 'contextpulse-ai-http-'));
+  const directory = mkdtempSync(join(tmpdir(), 'contextfidelity-ai-http-'));
   const port = 23000 + Math.floor(Math.random() * 1000);
   let source;
   const app = createApp({ port, directory, testOnlyProviders: ['ollama', 'demo'], fetcher: async () => Response.json({ done: true, message: { content: json({ candidates: [candidate(source)] }) } }) });
@@ -278,7 +278,7 @@ test('HTTP automatic registration, selected input display and export persist rea
   const session = app.store.sessions(projectId)[0];
   source = app.store.addMessage(session.id, 'user', '제품 가설은 인터뷰로 검증한다.', ['제품']);
   const call = async (path, data) => {
-    const response = await fetch(`${app.origin}/api${path}`, { method: data ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', 'X-ContextPulse-Token': state.csrf }, ...(data ? { body: json(data) } : {}) });
+    const response = await fetch(`${app.origin}/api${path}`, { method: data ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', 'X-ContextFidelity-Token': state.csrf }, ...(data ? { body: json(data) } : {}) });
     return { status: response.status, value: await response.json() };
   };
   await call('/settings', settings);

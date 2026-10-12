@@ -10,7 +10,7 @@ import { Provider, buildRequest } from '../src/provider.js';
 import { createApp } from '../src/server.js';
 
 function fixture(t) {
-  const directory = mkdtempSync(join(tmpdir(), 'contextpulse-receipt-'));
+  const directory = mkdtempSync(join(tmpdir(), 'contextfidelity-receipt-'));
   const store = new Store(directory), project = store.projects()[0], session = store.sessions(project.id)[0];
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
   return { store, project, session, directory };
@@ -42,7 +42,7 @@ test('reasoning effort is saved per conversation and model requests use the sele
 });
 
 test('chat model endpoint persists a selection without changing another conversation', async t => {
-  const directory = mkdtempSync(join(tmpdir(), 'contextpulse-session-model-'));
+  const directory = mkdtempSync(join(tmpdir(), 'contextfidelity-session-model-'));
   const port = 24820 + Math.floor(Math.random() * 300);
   const requestedModels = [], requestedPayloads = [];
   const app = createApp({ directory, port, testOnlyProviders: ['openai'], fetcher: async (_url, options) => {
@@ -54,7 +54,7 @@ test('chat model endpoint persists a selection without changing another conversa
   await new Promise(resolve => app.server.listen(port, '127.0.0.1', resolve));
   t.after(async () => { await new Promise(resolve => app.server.close(resolve)); app.store.close(); rmSync(directory, { recursive: true, force: true }); });
   const initial = await fetch(`${app.origin}/api/state`), cookie = initial.headers.get('set-cookie').split(';')[0], state = await initial.json();
-  const headers = { 'Content-Type': 'application/json', 'X-ContextPulse-Token': state.csrf, Cookie: cookie };
+  const headers = { 'Content-Type': 'application/json', 'X-ContextFidelity-Token': state.csrf, Cookie: cookie };
   const call = async (path, data) => (await fetch(`${app.origin}/api${path}`, { headers, method: data ? 'POST' : 'GET', ...(data ? { body: JSON.stringify(data) } : {}) })).json();
   const project = app.store.projects()[0], first = app.store.sessions(project.id)[0], second = app.store.createSession(project.id);
   await call('/settings', { provider: 'openai', model: '', apiKey: 'fixture-session-model-key', autoContext: false });
@@ -264,7 +264,7 @@ test('a format repair retries a wrong-language answer with the exact requested i
 });
 
 test('HTTP accepts a follow-up while automatic context registration is still running', async t => {
-  const directory = mkdtempSync(join(tmpdir(), 'contextpulse-background-http-'));
+  const directory = mkdtempSync(join(tmpdir(), 'contextfidelity-background-http-'));
   const port = 25200 + Math.floor(Math.random() * 500);
   let releaseFirstExtraction, firstExtractionStarted, extractionCount = 0;
   const gate = new Promise(resolve => { releaseFirstExtraction = resolve; });
@@ -283,7 +283,7 @@ test('HTTP accepts a follow-up while automatic context registration is still run
   await new Promise(resolve => app.server.listen(port, '127.0.0.1', resolve));
   t.after(async () => { releaseFirstExtraction(); await app.close(); rmSync(directory, { recursive: true, force: true }); });
   const initial = await fetch(`${app.origin}/api/state`), cookie = initial.headers.get('set-cookie').split(';')[0], state = await initial.json();
-  const headers = { 'Content-Type': 'application/json', 'X-ContextPulse-Token': state.csrf, Cookie: cookie };
+  const headers = { 'Content-Type': 'application/json', 'X-ContextFidelity-Token': state.csrf, Cookie: cookie };
   const request = async (path, data) => {
     const response = await fetch(`${app.origin}/api${path}`, { headers, method: data ? 'POST' : 'GET', ...(data ? { body: JSON.stringify(data) } : {}) });
     return { status: response.status, value: await response.json() };
@@ -324,7 +324,7 @@ test('provider policy and limit diagnostics survive storage without exposing bea
 });
 
 test('English and Korean routes share data but keep prompts, system messages and UI copy separate', async t => {
-  const directory = mkdtempSync(join(tmpdir(), 'contextpulse-locale-'));
+  const directory = mkdtempSync(join(tmpdir(), 'contextfidelity-locale-'));
   const app = createApp({ directory, port: 24897 });
   await new Promise(r => app.server.listen(24897, '127.0.0.1', r));
   t.after(async () => { await new Promise(r => app.server.close(r)); app.store.close(); rmSync(directory, { recursive: true, force: true }); });
@@ -337,7 +337,7 @@ test('English and Korean routes share data but keep prompts, system messages and
     }
   }
   const state = await (await fetch(app.origin + '/api/state')).json();
-  const headers = { 'Content-Type': 'application/json', 'X-ContextPulse-Token': state.csrf, 'X-ContextPulse-Locale': 'en' };
+  const headers = { 'Content-Type': 'application/json', 'X-ContextFidelity-Token': state.csrf, 'X-ContextFidelity-Locale': 'en' };
   const demo = await (await fetch(app.origin + '/api/demo', { method: 'POST', headers, body: '{}' })).json();
   const detail = await (await fetch(app.origin + '/api/sessions/' + demo.session.id, { headers })).json();
   assert.ok(detail.runs[0].context_usage.decisions.length);
@@ -370,7 +370,7 @@ test('selection explicitly separates allowed context IDs from recent message IDs
 });
 
 test('restart retains an already validated answer if only extraction was interrupted', t => {
-  const directory = mkdtempSync(join(tmpdir(), 'contextpulse-restart-answer-'));
+  const directory = mkdtempSync(join(tmpdir(), 'contextfidelity-restart-answer-'));
   let store = new Store(directory);
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
   const session = store.sessions(store.projects()[0].id)[0];

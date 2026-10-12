@@ -1,66 +1,31 @@
-# ContextPulse
+# ContextFidelity
 
-A local-first, open-source chat workspace that automatically selects the context needed for each question and preserves the exact context sent to each model call.
+ContextFidelity is an open-source, local-first chat workspace that keeps conversations on topic. It selects relevant saved context for each question and shows the exact context and source evidence sent with every answer.
 
-## Run locally
+[한국어](README.ko.md)
 
-Use Node.js 24 or newer:
+## What it does
 
-```sh
-npm install
-npm run build
-npm start
-```
+- Automatically identifies the topic of a question and retrieves related context from the current project.
+- Registers useful information from user messages with links to the original conversation. Assistant-generated suggestions stay as hypotheses until reviewed.
+- Keeps user-stated conversation criteria versioned and separate from background information, so an explicit change can replace an earlier criterion without losing its history.
+- Generates an answer, checks it against the available conversation evidence, and can correct one detected conflict before checking again.
+- Shows an answer receipt with the actual model input, included and excluded context, search scores, and source messages. Past receipts preserve the content used at the time of the answer.
+- Lets users edit, scope, search, archive, restore, and delete context items, and delete conversations.
 
-Open http://127.0.0.1:8899. English is the default; Korean is available at `/ko/`. Both routes share the same projects and conversations. See [한국어 안내](README.ko.md).
+## Context selection
 
-## What the prototype does
+Saved context is searched with SQLite FTS5. The default score combines keyword matches (70%) and topic matches (30%); up to eight items scoring at least 50% are selected. Per-conversation include and exclude choices are also supported. This is keyword retrieval, not embedding-based semantic search, so a paraphrase with no overlapping terms may fail to find relevant context.
 
-- Sign in once with ChatGPT from the lower-left sidebar, then choose a model in the chat composer.
-- Keep the selected model when navigating, refreshing, or reconnecting the same account.
-- Store references, background, and hypotheses with topic and project scopes.
-- Search, archive, restore, or delete individual context items and their version history.
-- Identify topics automatically, then use SQLite FTS5 keyword matches and a visible score threshold to retrieve up to eight relevant context items. Chat-specific choices and always-included items are retained.
-- Generate a draft, validate it against original conversation evidence, correct a conflict once, and revalidate.
-- Show the topic, stored context, conversation context, and earlier messages sent for each answer directly below that answer.
-- Compare immutable request bodies across stages or answers, and inspect original sources.
-- Automatically register useful context from user messages without save buttons. Assistant proposals remain topic-scoped hypotheses in a review queue and are not sent to later answers until approved. Exact source quotes are checked before registration.
-- Manage user-stated conversation criteria separately: inspect the original source, archive, restore, or delete a full criterion chain.
-- Delete an individual conversation with its messages, answers, call records, and context derived from that conversation; an empty chat is created if it was the last one.
-- Delete all projects, conversations, context, decisions, answers, and model-call records from Settings while retaining sign-in and app preferences.
-- Follow the message language and repair a detectable language or exact-list-count mismatch once before showing the answer.
-- Display the answer after validation while automatic registration finishes, with language-specific stage progress.
+## Model and data
 
-## Connecting a model
+Users connect ChatGPT once and choose an available model in the chat composer. Context analysis, extraction, validation, and correction may make additional requests through the connected ChatGPT plan. Existing ChatGPT conversations are not imported.
 
-Sign in once with ChatGPT using the lower-left sidebar button. After sign-in, select an available model directly in the chat composer; the choice applies across conversations. Validation, correction, selection, and extraction can add model calls. Existing ChatGPT conversations are not imported. The app does not expose API-key or local-model setup as alternate chat providers. The fixed correction walkthrough is separate and clearly marked as a no-model-call example.
+By default, conversation and context data are stored in the app's SQLite workspace. OAuth credentials are stored separately on the server and excluded from exports. Hosted mode isolates each visitor's workspace. An answer receipt records the request that was sent; it does not establish how much the model attended to or relied on any particular context.
 
-## Data and evidence
+## Prototype limits
 
-Original messages, versioned context, automatic-registration candidates, and model-call snapshots are stored in `data/contextpulse.sqlite`. Credentials are held separately in a server-only local file with restrictive permissions, and are excluded from exports. OS keychain integration is not implemented. Local mode stays bound to loopback. Hosted mode uses isolated visitor databases and encrypts each visitor's OAuth credentials; see the deployment guide.
-
-Conversation criteria have their own tab inside Context manager, with source evidence and archive/restore/delete controls. Assistant-generated hypotheses wait for approval before becoming searchable context. Deleting a context or criterion keeps immutable receipts for past answers.
-
-“Context sent” is a receipt of the actual preserved request inputs; it does not measure model attention or prove how much an input influenced the answer. Editing a context item does not change earlier receipts. The fixed correction demo is labeled and makes no model calls. Real-world detection accuracy has not been benchmarked.
-
-Automatic context retrieval uses SQLite FTS5 over context titles, content, and topic labels. It ranks keyword matches with BM25 and applies a transparent keyword/topic coverage score and threshold; it does not use embeddings or semantic search, so synonyms and paraphrases without shared terms can be missed. The receipt records the search terms, score details, threshold, and contexts actually sent.
-
-English and Korean application copy and prompts are separate. Original user messages and historical model outputs are preserved, so they may be in either language.
-
-## Hosted demo and Cloudflare
-
-Run `docker compose -f compose.yaml up -d --build` and open `http://127.0.0.1:8903`. This runs the same chat, ChatGPT OAuth, composer model selection, and context features in hosted mode, with visitor-isolated data. Public deployment uses a persistent origin behind Cloudflare Tunnel, with its own configuration. OpenAI's open-source OAuth flow only accepts loopback callbacks; a public HTTPS website needs an OpenAI-registered website login client before ChatGPT sign-in can be enabled. Do not publish the public hostname as a live-model demo until that callback is registered. No public tunnel is started by the test configuration. See [Cloudflare demo guide](docs/cloudflare-demo.md).
-
-## Verification
-
-```sh
-npm test
-node scripts/diagnose-connection.mjs
-```
-
-Tests cover original-source preservation, project isolation, selection overrides, correction grounding, exact payload storage, per-answer receipts, early answer availability, route localization, OAuth validation, token rotation, and error diagnostics. The diagnostic script uses isolated temporary data and simulated OAuth/inference; it does not use your account. Real model testing is reported separately.
-
-`src/client.js` and `src/client.html` are the shared UI sources. `npm run build` generates English/Korean assets and CSS. Restart the server after changes so the runtime and generated interface use the same build.
+The project is a working prototype. It does not provide semantic or embedding search, and its conflict-checking accuracy has not been benchmarked. The fixed correction walkthrough demonstrates the review flow without making model calls; it is not an accuracy evaluation.
 
 ## License
 

@@ -7,7 +7,7 @@ import { generateKeyPairSync, sign } from 'node:crypto';
 import { createApp } from '../src/server.js';
 import { Provider, buildRequest } from '../src/provider.js';
 
-const directory = mkdtempSync(join(tmpdir(), 'contextpulse-connection-audit-'));
+const directory = mkdtempSync(join(tmpdir(), 'contextfidelity-connection-audit-'));
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const jwk = { ...publicKey.export({ format: 'jwk' }), kid: 'diagnostic' };
 const scope = 'openid profile email offline_access resource.invoke chatgpt.tokens.use.direct';
@@ -47,7 +47,7 @@ async function browser() {
   return { cookie: response.headers.get('set-cookie').split(';')[0], csrf: state.csrf };
 }
 async function api(client, path, data) {
-  const response = await http(app.origin + '/api' + path, { method: data === undefined ? 'GET' : 'POST', headers: { Cookie: client.cookie, 'X-ContextPulse-Token': client.csrf, 'Content-Type': 'application/json' }, ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
+  const response = await http(app.origin + '/api' + path, { method: data === undefined ? 'GET' : 'POST', headers: { Cookie: client.cookie, 'X-ContextFidelity-Token': client.csrf, 'Content-Type': 'application/json' }, ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
   const value = await response.json(); assert.equal(response.ok, true, value.error); return value;
 }
 async function authorize(client, returning = false) {

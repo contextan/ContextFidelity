@@ -113,7 +113,7 @@ export class Auth {
     this.pending.set(state, attempt); this.attempts.set(browserSession, attempt);
     const params = new URLSearchParams({ client_id: account?.client_id || 'dynamic_agent_client', ext_agent_host_id: this.value.host_id, response_type: 'code', redirect_uri: redirect, scope: 'openid profile email offline_access resource.invoke chatgpt.tokens.use.direct', resource: 'https://api.openai.com/v1', state, nonce, code_challenge_method: 'S256', code_challenge: createHash('sha256').update(verifier).digest('base64url') });
     if (account) { if (account.id_token) params.set('id_token_hint', account.id_token); if (account.email) params.set('login_hint', account.email); }
-    else params.set('agent_name_hint', 'ContextPulse');
+    else params.set('agent_name_hint', 'ContextFidelity');
     if (consent) params.set('prompt', 'consent');
     attempt.authorizationUrl = `https://auth.openai.com/api/accounts/authorize?${params}`;
     return attempt.authorizationUrl;

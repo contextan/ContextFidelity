@@ -10,7 +10,7 @@ This is not a Workers deployment. Workers' temporary filesystem is not persisten
 docker compose -f compose.yaml up -d --build
 ```
 
-Open `http://127.0.0.1:8903` (English) or `/ko` (Korean). This port binds only to loopback. The `contextpulse-test_demo-data` volume is separate from the existing local application's `data/`; private conversations and ChatGPT credentials are never copied into the image or demo volume.
+Open `http://127.0.0.1:8903` (English) or `/ko` (Korean). This port binds only to loopback. The Compose project and `contextpulse-test_demo-data` volume keep their existing names so an upgrade can update the running stack without losing hosted demo data. The volume is separate from the local application's `data/`; private conversations and ChatGPT credentials are never copied into the image or demo volume.
 
 Check the health status with `docker compose -f compose.yaml ps`. Stop without deleting data using `docker compose -f compose.yaml down`. Starting again preserves each visitor's signed cookie, encrypted ChatGPT OAuth credentials, conversations, decisions, contexts and call snapshots. Clearing browser cookies starts a new workspace; there is no account-based recovery in this prototype.
 
@@ -40,7 +40,7 @@ Run one origin process per data volume. Multiple replicas writing to one SQLite 
 
 ```sh
 npm test
-node scripts/audit-db.mjs data/contextpulse.sqlite outputs/database-audit.json
+node scripts/audit-db.mjs data/contextfidelity.sqlite outputs/database-audit.json
 node scripts/diagnose-connection.mjs
 ```
 
